@@ -1,0 +1,168 @@
+/* client/src/assets/main.css */
+
+*, *::before, *::after {
+  box-sizing: border-box; /* This forces padding to stay INSIDE the width */
+}
+
+/* --- 1. BASE & TYPOGRAPHY --- */
+:root {
+  font-family: 'Lato', system-ui, -apple-system, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  
+  /* Modern Palette (Zinc/Indigo/Emerald) */
+  --color-bg: #ffffff;
+  --color-surface: #f4f4f5; /* Zinc 100 */
+  --color-border: #e4e4e7;  /* Zinc 200 */
+  --color-text-main: #18181b; /* Zinc 900 */
+  --color-text-muted: #71717a; /* Zinc 500 */
+  
+  --color-primary: #4f46e5; /* Indigo 600 - sharper than standard blue */
+  --color-primary-hover: #4338ca;
+  
+  --color-accent: #33bbad; /* Emerald 500 - Modern clean green */
+  --color-accent-hover: #2a9d91;
+  
+  --color-danger: #ef4444;
+  
+  --radius: 8px; /* Sharper corners */
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+}
+
+[data-theme="dark"] {
+  --color-bg: #09090b; /* Zinc 950 - Deep black/gray */
+  --color-surface: #18181b; /* Zinc 900 */
+  --color-border: #27272a;  /* Zinc 800 */
+  --color-text-main: #f4f4f5;
+  --color-text-muted: #a1a1aa;
+  
+  --color-primary: #6366f1; /* Indigo 500 */
+  --color-primary-hover: #818cf8;
+  
+  --color-accent: #34d399; /* Emerald 400 */
+  --color-accent-hover: #10b981;
+}
+
+button, input, select, textarea {
+  font-family: 'Lato', system-ui, -apple-system, sans-serif;
+}
+
+body {
+  margin: 0;
+  background-color: var(--color-bg);
+  color: var(--color-text-main);
+  transition: background-color 0.2s, color 0.2s;
+}
+
+/* --- 2. LAYOUT --- */
+.app-layout {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.center-container {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+/* --- 3. MODERN COMPONENTS --- */
+
+/* Clean, bordered cards. No blurry glassmorphism. */
+.auth-card, .lobby-container {
+  background: var(--color-bg); /* Solid BG */
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 2rem;
+  width: 100%;
+  max-width: 420px;
+  box-shadow: var(--shadow-sm);
+}
+
+.lobby-container { max-width: 960px; }
+
+/* Typography */
+h1 { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.025em; margin: 0 0 0.5rem 0; }
+h2 { font-size: 1.25rem; font-weight: 600; }
+h3 { font-size: 1.125rem; font-weight: 600; margin: 0 0 0.5rem 0; }
+p { color: var(--color-text-muted); font-size: 0.925rem; margin-bottom: 1.5rem; }
+
+/* Inputs - Clean borders */
+.input-group { margin-bottom: 1.25rem; text-align: left; }
+.input-group label {
+  display: block;
+  font-size: 0.875rem;
+  font-weight: 500;
+  margin-bottom: 0.5rem;
+  color: var(--color-text-main);
+}
+
+input {
+  width: 100%;           /* Full width of parent */
+  max-width: 100%;       /* Never overflow parent */
+  padding: 10px 14px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  color: var(--color-text-main);
+  font-size: 0.95rem;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.1); /* Subtle glow ring */
+}
+
+/* Buttons - Flat, no 3D effects */
+.primary-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 0.625rem 1.25rem;
+  background-color: var(--color-primary);
+  color: #fff;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  font-weight: 500;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: background-color 0.15s;
+  gap: 8px; /* Spacing for icon */
+}
+
+.primary-btn:hover { background-color: var(--color-primary-hover); }
+
+/* The special "Play" button variant */
+.play-btn {
+  background-color: var(--color-accent);
+  color: #fff; /* Dark text on green usually looks cleaner, or white */
+  font-weight: 600;
+}
+.play-btn:hover { background-color: var(--color-accent-hover); }
+
+.primary-btn:disabled {
+  background-color: var(--color-surface);
+  color: var(--color-text-muted);
+  border-color: var(--color-border);
+  cursor: not-allowed;
+}
+
+/* Links */
+a { color: var(--color-primary); text-decoration: none; font-weight: 500; }
+a:hover { text-decoration: underline; }
+
+.error-msg { 
+  color: var(--color-danger); 
+  font-size: 0.875rem; 
+  margin-top: 0.5rem; 
+  padding: 0.5rem;
+  background: rgba(239, 68, 68, 0.1);
+  border-radius: var(--radius);
+}
