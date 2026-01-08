@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { Map, Location, User, sequelize } = require('../models');
-const { resolveLocation, refreshLocationMetadata } = require('../utils/geoUtils');
+const { resolveLocation, refreshLocationMetadata, checkPanoAvailability } = require('../utils/geoUtils');
 const auth = require('../middleware/auth');
 
 // Helper to process locations string
@@ -92,7 +92,10 @@ router.get('/:id/locations', async (req, res) => {
         const offset = (page - 1) * limit;
         
         const locations = await Location.findAndCountAll({
-            where: { map_id: req.params.id },
+            where: { 
+                map_id: req.params.id,
+                is_deleted: false 
+            },
             limit: parseInt(limit),
             offset: parseInt(offset),
             order: [['id', 'DESC']]
@@ -106,6 +109,226 @@ router.get('/:id/locations', async (req, res) => {
         });
     } catch (err) {
         res.status(500).json({ error: err.message });
+    }
+});
+
+// Get Deleted Locations
+router.get('/:id/deleted-locations', auth, async (req, res) => {
+    try {
+        const map = await Map.findByPk(req.params.id);
+        if (!map) return res.status(404).json({ error: 'Map not found' });
+
+        // Permission check
+        if (!req.user.is_admin && !req.user.is_root && map.creator_id !== req.user.id) {
+            return res.status(403).json({ error: 'Access Denied' });
+        }
+
+        const locations = await Location.findAll({
+            where: { 
+                map_id: map.id,
+                is_deleted: true 
+            },
+            order: [['id', 'DESC']]
+        });
+        
+        res.json(locations);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Restore Location
+router.post('/:id/restore-location/:locationId', auth, async (req, res) => {
+    try {
+        const map = await Map.findByPk(req.params.id);
+        if (!map) return res.status(404).json({ error: 'Map not found' });
+
+        if (!req.user.is_admin && !req.user.is_root && map.creator_id !== req.user.id) {
+            return res.status(403).json({ error: 'Access Denied' });
+        }
+
+        const loc = await Location.findOne({
+            where: { id: req.params.locationId, map_id: map.id }
+        });
+
+        if (!loc) return res.status(404).json({ error: 'Location not found' });
+
+        loc.is_deleted = false;
+        await loc.save();
+
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Empty Trash (Permanently Delete)
+router.delete('/:id/empty-trash', auth, async (req, res) => {
+    try {
+        const map = await Map.findByPk(req.params.id);
+        if (!map) return res.status(404).json({ error: 'Map not found' });
+
+        if (!req.user.is_admin && !req.user.is_root && map.creator_id !== req.user.id) {
+            return res.status(403).json({ error: 'Access Denied' });
+        }
+
+        const deleted = await Location.destroy({
+            where: { 
+                map_id: map.id,
+                is_deleted: true
+            }
+        });
+
+        res.json({ success: true, count: deleted });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Check Availability (Stream)
+router.get('/:id/check-availability', auth, async (req, res) => {
+    try {
+        const map = await Map.findByPk(req.params.id);
+        if (!map) return res.status(404).json({ error: 'Map not found' });
+
+        if (!req.user.is_admin && !req.user.is_root && map.creator_id !== req.user.id) {
+            return res.status(403).json({ error: 'Access Denied' });
+        }
+
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+
+        // Allow resuming - offset refers to the index in the full list of locations (including deleted ones)
+        // to ensure stability.
+        const startOffset = parseInt(req.query.offset) || 0;
+
+        // We count ALL locations to have a stable total for progress bars
+        const total = await Location.count({ where: { map_id: map.id } });
+        res.write(`data: ${JSON.stringify({ type: 'start', total })}\n\n`);
+
+        // High concurrency: QPM 30,000 allows ~500 requests/sec.
+        // Batch size 350 with parallel execution fits well.
+        const BATCH_SIZE = 350; 
+        const CONCURRENCY = 50; // Process 50 at a time within the batch to avoid choking
+        
+        let processedCount = startOffset;
+        let removedCount = 0;
+        let checkedCount = 0;
+
+        // Helper for concurrency
+        const processWithConcurrency = async (items, concurrency, fn) => {
+            let index = 0;
+            const results = [];
+            const executing = [];
+
+            const runNext = async () => {
+                if (index >= items.length) return;
+                const i = index++;
+                const item = items[i];
+                
+                try {
+                    results[i] = await fn(item);
+                } catch (e) {
+                    results[i] = { error: e };
+                }
+                
+                // Immediately start next
+                return runNext();
+            };
+
+            // Start initial pool
+            for (let i = 0; i < concurrency && i < items.length; i++) {
+                executing.push(runNext());
+            }
+
+            await Promise.all(executing);
+            return results;
+        };
+
+        // Iterate over ALL locations to keep pagination stable
+        for (let offset = startOffset; offset < total; offset += BATCH_SIZE) {
+            const locations = await Location.findAll({ 
+                where: { map_id: map.id },
+                limit: BATCH_SIZE,
+                offset: offset,
+                order: [['id', 'ASC']]
+            });
+            
+            const toRemoveIds = [];
+            
+            // Define the check function
+            const checkLocation = async (loc) => {
+                // If already deleted, just skip
+                if (loc.is_deleted) {
+                    processedCount++;
+                    // We can send periodic updates here too if needed, but skipped items are fast
+                    return { skipped: true };
+                }
+
+                // Check availability
+                const isAvailable = await checkPanoAvailability(loc.pano_id);
+                
+                processedCount++;
+                checkedCount++;
+                
+                // Send REAL-TIME progress update
+                if (processedCount % 10 === 0 || processedCount === total) {
+                     res.write(`data: ${JSON.stringify({ 
+                        type: 'progress', 
+                        processed: processedCount, 
+                        removed: removedCount, // Note: This is "so far confirmed removed"
+                        checked: checkedCount
+                    })}\n\n`);
+                    if (res.flush) res.flush();
+                }
+
+                if (!isAvailable) {
+                    // We don't increment removedCount here for the progress bar 
+                    // until we actually confirm/add to list, but for UX 'removedCount'
+                    // usually means "found to be invalid".
+                    removedCount++; 
+                    return { remove: true, id: loc.id };
+                }
+                return { ok: true };
+            };
+
+            // Execute with concurrency limit
+            const results = await processWithConcurrency(locations, CONCURRENCY, checkLocation);
+
+            // Collect IDs to remove
+            results.forEach(r => {
+                if (r && r.remove) {
+                    toRemoveIds.push(r.id);
+                }
+            });
+
+            // Bulk update for efficiency
+            if (toRemoveIds.length > 0) {
+                await Location.update(
+                    { is_deleted: true }, 
+                    { where: { id: toRemoveIds } }
+                );
+            }
+        }
+        
+        res.write(`data: ${JSON.stringify({ 
+            type: 'done', 
+            processed: processedCount, 
+            removed: removedCount,
+            checked: checkedCount
+        })}\n\n`);
+        
+        res.end();
+
+    } catch (err) {
+        console.error('Availability check error:', err);
+        if (!res.headersSent) {
+            res.status(500).json({ error: err.message });
+        } else {
+            res.write(`data: ${JSON.stringify({ type: 'error', message: err.message })}\n\n`);
+            res.end();
+        }
     }
 });
 
@@ -141,8 +364,8 @@ router.delete('/:id/locations/:locationId', auth, async (req, res) => {
     }
 });
 
-// Refresh All Locations (Root Only)
-router.post('/:id/refresh-locations', auth, async (req, res) => {
+// Refresh All Locations (Root Only) - Streaming
+router.get('/:id/refresh-locations-stream', auth, async (req, res) => {
     try {
         if (!req.user.is_root) {
             return res.status(403).json({ error: 'Access Denied: Root Only' });
@@ -151,34 +374,71 @@ router.post('/:id/refresh-locations', auth, async (req, res) => {
         const map = await Map.findByPk(req.params.id);
         if (!map) return res.status(404).json({ error: 'Map not found' });
 
-        const locations = await Location.findAll({ where: { map_id: map.id } });
+        // Set headers for SSE
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+
+        const total = await Location.count({ where: { map_id: map.id } });
+        res.write(`data: ${JSON.stringify({ type: 'start', total })}\n\n`);
+
+        const BATCH_SIZE = 50;
         let updatedCount = 0;
         let failedCount = 0;
+        let processedCount = 0;
 
-        for (const loc of locations) {
-            const freshData = await refreshLocationMetadata(loc);
-            if (freshData) {
-                loc.pano_id = freshData.panoId;
-                loc.lat = freshData.lat;
-                loc.lng = freshData.lng;
-                await loc.save();
-                updatedCount++;
-            } else {
-                failedCount++;
+        // Process in batches
+        for (let offset = 0; offset < total; offset += BATCH_SIZE) {
+            const locations = await Location.findAll({ 
+                where: { map_id: map.id },
+                limit: BATCH_SIZE,
+                offset: offset,
+                order: [['id', 'ASC']] // Ensure stable ordering
+            });
+
+            for (const loc of locations) {
+                const freshData = await refreshLocationMetadata(loc);
+                if (freshData) {
+                    loc.pano_id = freshData.panoId;
+                    loc.lat = freshData.lat;
+                    loc.lng = freshData.lng;
+                    await loc.save();
+                    updatedCount++;
+                } else {
+                    failedCount++;
+                }
+                processedCount++;
+                
+                // Small delay to avoid rate limits
+                await new Promise(r => setTimeout(r, 20)); 
             }
-            // Small delay to avoid rate limits if many locations
-            await new Promise(r => setTimeout(r, 50)); 
+
+            // Send progress update after each batch
+            res.write(`data: ${JSON.stringify({ 
+                type: 'progress', 
+                processed: processedCount, 
+                updated: updatedCount, 
+                failed: failedCount 
+            })}\n\n`);
         }
 
-        res.json({ 
-            success: true, 
-            total: locations.length, 
+        res.write(`data: ${JSON.stringify({ 
+            type: 'done', 
+            processed: processedCount, 
             updated: updatedCount, 
             failed: failedCount 
-        });
+        })}\n\n`);
+        
+        res.end();
 
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        console.error('Refresh error:', err);
+        if (!res.headersSent) {
+            res.status(500).json({ error: err.message });
+        } else {
+            res.write(`data: ${JSON.stringify({ type: 'error', message: err.message })}\n\n`);
+            res.end();
+        }
     }
 });
 
@@ -349,6 +609,42 @@ router.post('/:id/import-vali', auth, async (req, res) => {
         await Location.bulkCreate(locsData);
 
         res.json({ success: true, added: locsData.length });
+
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Export Vali JSON
+router.get('/:id/export-vali', auth, async (req, res) => {
+    try {
+        const map = await Map.findByPk(req.params.id);
+        if (!map) return res.status(404).json({ error: 'Map not found' });
+
+        // Permission check
+        const isCreator = req.user.is_admin && map.creator_id === req.user.id;
+        const isRoot = req.user.is_root;
+
+        if (!isCreator && !isRoot) {
+            return res.status(403).json({ error: 'Access Denied' });
+        }
+
+        const locations = await Location.findAll({
+            where: { 
+                map_id: map.id,
+                is_deleted: false 
+            },
+            attributes: ['pano_id', 'lat', 'lng']
+        });
+
+        const exportData = locations.map(l => ({
+            panoId: l.pano_id,
+            lat: l.lat,
+            lng: l.lng
+        }));
+
+        res.setHeader('Content-Disposition', `attachment; filename="${map.name.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_vali.json"`);
+        res.json(exportData);
 
     } catch (err) {
         res.status(500).json({ error: err.message });

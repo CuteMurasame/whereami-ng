@@ -485,11 +485,12 @@ const resetGame = () => {
 
 const gameRank = computed(() => {
   const score = totalScore.value;
-  if (score >= 24000) return { title: 'LEGEND', color: '#FFD700' };
-  if (score >= 20000) return { title: 'MASTER', color: '#9C27B0' };
-  if (score >= 15000) return { title: 'EXPLORER', color: '#2196F3' };
-  if (score >= 5000) return { title: 'TRAVELER', color: '#4CAF50' };
-  return { title: 'BEGINNER', color: '#9E9E9E' };
+  if (score >= 24000) return { title: 'LEGEND', color: '#FF0000' };
+  if (score >= 20000) return { title: 'MASTER', color: '#FF8000' };
+  if (score >= 15000) return { title: 'EXPLORER', color: '#C0C000' };
+  if (score >= 10000) return { title: 'VOYAGER', color: '#0000FF' };
+  if (score >= 5000) return { title: 'TRAVELER', color: '#00C0C0' };
+  return { title: 'BEGINNER', color: '#008000' };
 });
 
 const initResultMap = async (actual, guess) => {

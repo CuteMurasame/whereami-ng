@@ -3,7 +3,7 @@ const router = express.Router();
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
-const { User, RatingHistory, Game } = require('../models');
+const { User, RatingHistory, Game, Map } = require('../models');
 const auth = require('../middleware/auth');
 
 // --- MULTER SETUP (Keep existing code) ---
@@ -101,10 +101,63 @@ router.get('/:id/games', async (req, res) => {
         const games = await Game.findAll({
             where: whereClause,
             order: [['created_at', 'DESC']],
-            limit: 50 // Limit to last 50 games for now
+            limit: 50, // Limit to last 50 games for now
+            include: [{
+                model: Map,
+                attributes: ['name']
+            }]
         });
 
         res.json(games);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// 6. Get User Statistics
+router.get('/:id/stats', async (req, res) => {
+    try {
+        const userId = req.params.id;
+        
+        // Singleplayer Stats
+        const spGames = await Game.findAll({
+            where: { 
+                user_id: userId, 
+                type: 'singleplayer', 
+                status: 'finished' 
+            },
+            attributes: ['total_score', 'mode', 'created_at']
+        });
+
+        const totalGames = spGames.length;
+        const totalScore = spGames.reduce((sum, g) => sum + g.total_score, 0);
+        const avgScore = totalGames > 0 ? Math.round(totalScore / totalGames) : 0;
+        const maxScore = totalGames > 0 ? Math.max(...spGames.map(g => g.total_score)) : 0;
+        
+        // Mode breakdown
+        const modes = {};
+        spGames.forEach(g => {
+            if (!modes[g.mode]) modes[g.mode] = { count: 0, totalScore: 0 };
+            modes[g.mode].count++;
+            modes[g.mode].totalScore += g.total_score;
+        });
+
+        const modeStats = Object.keys(modes).map(mode => ({
+            mode,
+            count: modes[mode].count,
+            avgScore: Math.round(modes[mode].totalScore / modes[mode].count)
+        }));
+
+        res.json({
+            singleplayer: {
+                totalGames,
+                totalScore,
+                avgScore,
+                maxScore,
+                modeStats
+            }
+        });
+
     } catch (err) {
         res.status(500).json({ error: err.message });
     }

@@ -134,4 +134,20 @@ async function refreshLocationMetadata(loc) {
     }
 }
 
-module.exports = { parseGoogleMapsLink, resolveLocation, refreshLocationMetadata };
+async function checkPanoAvailability(panoId) {
+    try {
+        const url = `https://maps.googleapis.com/maps/api/streetview/metadata?key=${GOOGLE_MAPS_API_KEY}&pano=${panoId}`;
+        const res = await axios.get(url, { timeout: 10000 });
+        // "OK" means it exists. "ZERO_RESULTS" or "NOT_FOUND" means it's gone.
+        return res.data && res.data.status === 'OK';
+    } catch (err) {
+        // Network error? Assume it's fine to avoid false deletion, or log it.
+        // But for "bulk delete", we might want to be conservative.
+        // If it's a 404, axios throws.
+        if (err.response && err.response.status === 404) return false;
+        console.error(`Check failed for ${panoId}: ${err.message}`);
+        return true; // Assume valid on error to be safe
+    }
+}
+
+module.exports = { parseGoogleMapsLink, resolveLocation, refreshLocationMetadata, checkPanoAvailability };

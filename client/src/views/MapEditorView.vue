@@ -114,10 +114,10 @@
 
           <!-- Import Vali JSON Card -->
           <div class="card form-card">
-            <h3>Import Vali JSON</h3>
+            <h3>{{ t('maps.vali_json_title') }}</h3>
             <div class="info-box">
               <i class="fa-solid fa-circle-info"></i>
-              Import JSON from Vali generator
+              {{ t('maps.vali_json_help') }}
             </div>
             <input 
               type="file" 
@@ -128,7 +128,10 @@
             />
             <button @click="importValiJson" :disabled="importing || !selectedFile" class="primary-btn full-width add-btn">
               <i v-if="importing" class="fa-solid fa-spinner fa-spin"></i>
-              <span v-else>Import JSON</span>
+              <span v-else>{{ t('maps.import_json') }}</span>
+            </button>
+            <button @click="exportValiJson" class="primary-btn full-width add-btn" style="background: var(--color-text-muted); margin-top: 10px;">
+                <i class="fa-solid fa-download"></i> {{ t('maps.export_json') }}
             </button>
           </div>
         </div>
@@ -137,12 +140,24 @@
         <div class="editor-main">
           <div class="card list-card">
             <div class="list-header">
-              <h3>{{ t('maps.manage_locations') }}</h3>
+              <div class="tabs">
+                  <button :class="{ active: activeTab === 'locations' }" @click="activeTab = 'locations'">{{ t('maps.manage_locations') }}</button>
+                  <button :class="{ active: activeTab === 'trash' }" @click="() => { activeTab = 'trash'; fetchDeletedLocations(); }">Deleted ({{ deletedLocations.length }})</button>
+              </div>
+              
               <div class="header-actions">
-                <button v-if="isRoot" @click="refreshAllLocations" :disabled="refreshing" class="icon-btn refresh-all-btn" :title="t('maps.refresh_all')">
-                  <i :class="['fa-solid fa-arrows-rotate', refreshing ? 'fa-spin' : '']"></i>
-                </button>
-                <button @click="fetchLocations" class="icon-btn refresh-btn"><i class="fa-solid fa-rotate-right"></i></button>
+                <template v-if="activeTab === 'locations'">
+                    <button v-if="isRoot" @click="checkAvailability" class="icon-btn" :title="t('maps.check_btn_title')">
+                        <i class="fa-solid fa-broom"></i>
+                    </button>
+                    <button v-if="isRoot" @click="refreshAllLocations" :disabled="refreshing" class="icon-btn refresh-all-btn" :title="t('maps.refresh_all')">
+                        <i :class="['fa-solid fa-arrows-rotate', refreshing ? 'fa-spin' : '']"></i>
+                    </button>
+                    <button @click="fetchLocations" class="icon-btn refresh-btn"><i class="fa-solid fa-rotate-right"></i></button>
+                </template>
+                <template v-else>
+                    <button @click="emptyTrash" class="danger-btn small-btn">Empty Trash</button>
+                </template>
               </div>
             </div>
             
@@ -150,44 +165,76 @@
               <i class="fa-solid fa-spinner fa-spin"></i>
             </div>
 
-            <div v-else-if="locations.length === 0" class="empty-box">
-              {{ t('maps.no_locations') }}
+            <!-- TAB: ACTIVE LOCATIONS -->
+            <div v-else-if="activeTab === 'locations'">
+                <div v-if="locations.length === 0" class="empty-box">
+                {{ t('maps.no_locations') }}
+                </div>
+
+                <div v-else class="table-wrapper">
+                <table class="locations-table">
+                    <thead>
+                    <tr>
+                        <th style="width: 60px">ID</th>
+                        <th>{{ t('maps.pano_id') }}</th>
+                        <th>{{ t('maps.lat_lng') }}</th>
+                        <th class="text-right" style="width: 80px">{{ t('common.actions') }}</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    <tr v-for="loc in locations" :key="loc.id">
+                        <td>{{ loc.id }}</td>
+                        <td class="mono">{{ loc.pano_id }}</td>
+                        <td class="mono">{{ loc.lat.toFixed(5) }}, {{ loc.lng.toFixed(5) }}</td>
+                        <td class="text-right">
+                        <button @click="deleteLocation(loc.id)" class="icon-btn delete-btn">
+                            <i class="fa-solid fa-trash"></i>
+                        </button>
+                        </td>
+                    </tr>
+                    </tbody>
+                </table>
+                </div>
+
+                <!-- Pagination -->
+                <div class="pagination" v-if="totalPages > 1">
+                <button :disabled="page === 1" @click="changePage(page - 1)" class="page-btn">
+                    <i class="fa-solid fa-chevron-left"></i>
+                </button>
+                <span class="page-info">{{ page }} / {{ totalPages }}</span>
+                <button :disabled="page === totalPages" @click="changePage(page + 1)" class="page-btn">
+                    <i class="fa-solid fa-chevron-right"></i>
+                </button>
+                </div>
             </div>
 
-            <div v-else class="table-wrapper">
-              <table class="locations-table">
-                <thead>
-                  <tr>
-                    <th style="width: 60px">ID</th>
-                    <th>{{ t('maps.pano_id') }}</th>
-                    <th>{{ t('maps.lat_lng') }}</th>
-                    <th class="text-right" style="width: 80px">{{ t('common.actions') }}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="loc in locations" :key="loc.id">
-                    <td>{{ loc.id }}</td>
-                    <td class="mono">{{ loc.pano_id }}</td>
-                    <td class="mono">{{ loc.lat.toFixed(5) }}, {{ loc.lng.toFixed(5) }}</td>
-                    <td class="text-right">
-                      <button @click="deleteLocation(loc.id)" class="icon-btn delete-btn">
-                        <i class="fa-solid fa-trash"></i>
-                      </button>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-
-            <!-- Pagination -->
-            <div class="pagination" v-if="totalPages > 1">
-              <button :disabled="page === 1" @click="changePage(page - 1)" class="page-btn">
-                <i class="fa-solid fa-chevron-left"></i>
-              </button>
-              <span class="page-info">{{ page }} / {{ totalPages }}</span>
-              <button :disabled="page === totalPages" @click="changePage(page + 1)" class="page-btn">
-                <i class="fa-solid fa-chevron-right"></i>
-              </button>
+            <!-- TAB: DELETED LOCATIONS -->
+            <div v-else class="deleted-view">
+                <div v-if="deletedLocations.length === 0" class="empty-box">
+                    {{ t('maps.trash_empty') }}
+                </div>
+                <div v-else class="table-wrapper">
+                    <table class="locations-table">
+                        <thead>
+                        <tr>
+                            <th style="width: 60px">ID</th>
+                            <th>{{ t('maps.pano_id') }}</th>
+                            <th class="text-right" style="width: 80px">{{ t('common.actions') }}</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        <tr v-for="loc in deletedLocations" :key="loc.id">
+                            <td>{{ loc.id }}</td>
+                            <td class="mono">{{ loc.pano_id }}</td>
+                            <td class="text-right">
+                            <button @click="restoreLocation(loc.id)" class="icon-btn" title="Restore">
+                                <i class="fa-solid fa-trash-arrow-up"></i>
+                            </button>
+                            </td>
+                        </tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
 
           </div>
@@ -195,6 +242,51 @@
 
       </div>
     </div>
+
+    <!-- Check Availability Modal -->
+    <div v-if="checkProgress.show" class="modal-overlay">
+      <div class="modal-content">
+        <h3>{{ t('maps.checking_availability') }}</h3>
+        <div class="progress-bar-container">
+          <div class="progress-bar" :style="{ width: (checkProgress.total ? (checkProgress.processed / checkProgress.total * 100) : 0) + '%' }"></div>
+        </div>
+        <div class="progress-stats">
+          <div class="stat-item">
+            <span class="label">{{ t('common.processed') }}</span>
+            <span class="value">{{ checkProgress.processed }} / {{ checkProgress.total }}</span>
+          </div>
+          <div class="stat-item">
+            <span class="label">{{ t('common.deleted') }}</span>
+            <span class="value text-danger">{{ checkProgress.deleted }}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Progress Modal -->
+    <div v-if="refreshProgress.show" class="modal-overlay">
+      <div class="modal-content">
+        <h3>{{ t('maps.refreshing_locations') }}</h3>
+        <div class="progress-bar-container">
+          <div class="progress-bar" :style="{ width: (refreshProgress.total ? (refreshProgress.current / refreshProgress.total * 100) : 0) + '%' }"></div>
+        </div>
+        <div class="progress-stats">
+          <div class="stat-item">
+            <span class="label">{{ t('common.progress') }}</span>
+            <span class="value">{{ refreshProgress.current }} / {{ refreshProgress.total }}</span>
+          </div>
+          <div class="stat-item">
+            <span class="label">{{ t('common.updated') }}</span>
+            <span class="value text-success">{{ refreshProgress.updated }}</span>
+          </div>
+          <div class="stat-item">
+            <span class="label">{{ t('common.failed') }}</span>
+            <span class="value text-danger">{{ refreshProgress.failed }}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
   </DashboardLayout>
 </template>
 
@@ -222,6 +314,10 @@ const selectedFile = ref(null);
 const fileInput = ref(null);
 const loadingLocations = ref(false);
 const deleteCount = ref(10);
+const refreshProgress = ref({ show: false, current: 0, total: 100, updated: 0, failed: 0 });
+const checkProgress = ref({ show: false, processed: 0, total: 0, deleted: 0 });
+const activeTab = ref('locations'); // 'locations' | 'trash'
+const deletedLocations = ref([]);
 
 const form = ref({
   name: '',
@@ -272,6 +368,15 @@ const fetchLocations = async () => {
     console.error(err);
   } finally {
     loadingLocations.value = false;
+  }
+};
+
+const fetchDeletedLocations = async () => {
+  try {
+    const res = await api.get(`/maps/${route.params.id}/deleted-locations`);
+    deletedLocations.value = res.data;
+  } catch (err) {
+    console.error(err);
   }
 };
 
@@ -360,25 +465,51 @@ const importValiJson = async () => {
       
       const res = await api.post(`/maps/${route.params.id}/import-vali`, jsonContent);
       
-      Swal.fire(t('common.status'), `Imported ${res.data.added} locations`, 'success');
+      Swal.fire(t('common.status'), t('maps.import_success', { count: res.data.added }), 'success');
       if (fileInput.value) fileInput.value.value = '';
       selectedFile.value = null;
       await fetchLocations();
       
     } catch (err) {
       console.error(err);
-      Swal.fire(t('admin.error'), err.response?.data?.error || 'Invalid JSON or API Error', 'error');
+      Swal.fire(t('admin.error'), err.response?.data?.error || t('maps.import_failed'), 'error');
     } finally {
       importing.value = false;
     }
   };
   
   reader.onerror = () => {
-    Swal.fire(t('admin.error'), 'Failed to read file', 'error');
+    Swal.fire(t('admin.error'), t('maps.read_file_failed'), 'error');
     importing.value = false;
   };
   
   reader.readAsText(selectedFile.value);
+};
+
+const exportValiJson = async () => {
+    try {
+        const res = await api.get(`/maps/${route.params.id}/export-vali`, { responseType: 'blob' });
+        const url = window.URL.createObjectURL(new Blob([res.data]));
+        const link = document.createElement('a');
+        link.href = url;
+        
+        const contentDisposition = res.headers['content-disposition'];
+        let fileName = 'map_export.json';
+        if (contentDisposition) {
+            const fileNameMatch = contentDisposition.match(/filename="?([^"]+)"?/);
+            if (fileNameMatch && fileNameMatch.length === 2)
+                fileName = fileNameMatch[1];
+        }
+        
+        link.setAttribute('download', fileName);
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.URL.revokeObjectURL(url);
+    } catch (err) {
+        console.error(err);
+        Swal.fire(t('admin.error'), t('maps.export_failed'), 'error');
+    }
 };
 
 const deleteLocation = async (id) => {
@@ -395,16 +526,138 @@ const deleteLocation = async (id) => {
 const refreshAllLocations = async () => {
   if (!confirm(t('maps.refresh_confirm'))) return;
   
-  refreshing.value = true;
-  try {
-    const res = await api.post(`/maps/${route.params.id}/refresh-locations`);
-    Swal.fire(t('common.status'), `Updated: ${res.data.updated}, Failed: ${res.data.failed}`, 'success');
-    fetchLocations();
-  } catch (err) {
-    Swal.fire(t('admin.error'), err.response?.data?.error || t('admin.error'), 'error');
-  } finally {
-    refreshing.value = false;
-  }
+  refreshProgress.value = { show: true, current: 0, total: 0, updated: 0, failed: 0 };
+  
+  await runStreamProcess(
+    `/maps/${route.params.id}/refresh-locations-stream`,
+    refreshProgress,
+    (data) => {
+        if (data.type === 'start') {
+            refreshProgress.value.total = data.total;
+        } else if (data.type === 'progress') {
+            refreshProgress.value.current = data.processed;
+            refreshProgress.value.updated = data.updated;
+            refreshProgress.value.failed = data.failed;
+        } else if (data.type === 'done') {
+             refreshProgress.value.current = data.processed;
+             refreshProgress.value.updated = data.updated;
+             refreshProgress.value.failed = data.failed;
+             Swal.fire(t('common.status'), t('maps.refresh_complete_msg', { updated: data.updated, failed: data.failed }), 'success');
+             fetchLocations();
+        }
+    }
+  );
+};
+
+const checkAvailability = async () => {
+    if (!confirm(t('maps.check_availability_confirm'))) return;
+
+    checkProgress.value = { show: true, processed: 0, total: 0, deleted: 0 };
+
+    await runStreamProcess(
+        `/maps/${route.params.id}/check-availability`,
+        checkProgress,
+        (data) => {
+            if (data.type === 'start') {
+                checkProgress.value.total = data.total;
+            } else if (data.type === 'progress') {
+                checkProgress.value.processed = data.processed;
+                checkProgress.value.deleted = data.removed;
+            } else if (data.type === 'done') {
+                checkProgress.value.processed = data.processed;
+                checkProgress.value.deleted = data.removed;
+                Swal.fire(t('common.completed'), t('maps.check_complete_msg', { count: data.removed }), 'success');
+                fetchLocations();
+                fetchDeletedLocations();
+            }
+        }
+    );
+};
+
+// Reusable Stream Processor with Retry
+const runStreamProcess = async (url, progressRef, onData) => {
+    let retryCount = 0;
+    const maxRetries = 5;
+    let offset = 0;
+
+    const connect = async () => {
+        try {
+            const response = await fetch(`${api.defaults.baseURL}${url}?offset=${offset}`, {
+                headers: { 
+                    'Authorization': `Bearer ${authState.token}` 
+                }
+            });
+
+            if (!response.ok) throw new Error(response.statusText);
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                const chunk = decoder.decode(value, { stream: true });
+                const lines = chunk.split('\n\n');
+
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        try {
+                            const data = JSON.parse(line.slice(6));
+                            
+                            if (data.type === 'error') throw new Error(data.message);
+                            
+                            // Update offset for resume
+                            if (data.processed) offset = data.processed;
+                            
+                            onData(data);
+
+                            if (data.type === 'done') {
+                                setTimeout(() => { progressRef.value.show = false; }, 1000);
+                                return; // Success
+                            }
+                        } catch (e) {
+                            console.error('Stream parse error:', e);
+                        }
+                    }
+                }
+            }
+        } catch (err) {
+            console.error('Stream error:', err);
+            if (retryCount < maxRetries) {
+                retryCount++;
+                console.log(`Retrying... (${retryCount}/${maxRetries})`);
+                await new Promise(r => setTimeout(r, 2000)); // Wait 2s before retry
+                return connect(); // Recursive retry
+            } else {
+                progressRef.value.show = false;
+                Swal.fire(t('admin.error'), t('common.operation_failed_retry', { message: err.message }), 'error');
+            }
+        }
+    };
+
+    await connect();
+};
+
+const restoreLocation = async (id) => {
+    try {
+        await api.post(`/maps/${route.params.id}/restore-location/${id}`);
+        fetchDeletedLocations();
+        fetchLocations();
+    } catch (err) {
+        Swal.fire(t('admin.error'), t('maps.restore_failed'), 'error');
+    }
+};
+
+const emptyTrash = async () => {
+    if (!confirm(t('common.confirm_undone'))) return;
+    try {
+        const res = await api.delete(`/maps/${route.params.id}/empty-trash`);
+        fetchDeletedLocations();
+        Swal.fire(t('common.success'), t('maps.empty_trash_success', { count: res.data.count }), 'success');
+    } catch (err) {
+        Swal.fire(t('admin.error'), t('maps.empty_trash_failed'), 'error');
+    }
 };
 
 const handleDeleteMap = async (e) => {
@@ -586,4 +839,42 @@ input:focus, textarea:focus {
   .editor-grid { grid-template-columns: 1fr; }
   .table-wrapper { max-height: 500px; }
 }
+
+/* Modal */
+.modal-overlay {
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, 0.5); z-index: 1000;
+  display: flex; align-items: center; justify-content: center;
+}
+.modal-content {
+  background: var(--color-bg); padding: 2rem; border-radius: var(--radius);
+  width: 400px; max-width: 90%; box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+}
+.modal-content h3 { margin-top: 0; margin-bottom: 1.5rem; text-align: center; }
+
+.progress-bar-container {
+  height: 10px; background: var(--color-surface); border-radius: 5px;
+  overflow: hidden; margin-bottom: 1.5rem; border: 1px solid var(--color-border);
+}
+.progress-bar {
+  height: 100%; background: var(--color-primary); transition: width 0.3s ease;
+}
+
+.progress-stats { display: flex; justify-content: space-between; gap: 1rem; }
+.stat-item { display: flex; flex-direction: column; align-items: center; }
+.stat-item .label { font-size: 0.8rem; color: var(--color-text-muted); }
+.stat-item .value { font-weight: 600; font-size: 1.1rem; }
+.text-success { color: #10b981; }
+.text-danger { color: #ef4444; }
+
+.tabs { display: flex; gap: 10px; }
+.tabs button {
+    background: transparent; border: none; padding: 0.5rem 1rem;
+    font-weight: 600; color: var(--color-text-muted); cursor: pointer;
+    border-bottom: 2px solid transparent;
+}
+.tabs button.active {
+    color: var(--color-primary); border-bottom-color: var(--color-primary);
+}
+.small-btn { font-size: 0.8rem; padding: 4px 10px; min-height: 30px; }
 </style>

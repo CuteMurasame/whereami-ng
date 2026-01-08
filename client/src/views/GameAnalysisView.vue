@@ -4,8 +4,8 @@
       <div v-if="loading" class="loading-state">
         <i class="fa-solid fa-circle-notch fa-spin"></i> {{ t('analysis.loading') }}
       </div>
-      <div v-else-if="!game" class="error-state">
-        {{ t('analysis.not_found') }}
+      <div v-else-if="!game || error" class="error-state">
+        {{ error || t('analysis.not_found') }}
       </div>
       <div v-else class="analysis-content">
         <div class="header-card">
@@ -73,6 +73,7 @@ const route = useRoute();
 const router = useRouter();
 const loading = ref(true);
 const game = ref(null);
+const error = ref(null);
 
 const loader = new Loader({
   apiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY,
@@ -94,11 +95,12 @@ const getStreetViewUrl = (panoId) => {
 const gameRank = computed(() => {
   if (!game.value) return null;
   const score = game.value.total_score;
-  if (score >= 24000) return { title: t('analysis.ranks.legend'), color: '#FFD700' };
-  if (score >= 20000) return { title: t('analysis.ranks.master'), color: '#9C27B0' };
-  if (score >= 15000) return { title: t('analysis.ranks.explorer'), color: '#2196F3' };
-  if (score >= 5000) return { title: t('analysis.ranks.traveler'), color: '#4CAF50' };
-  return { title: t('analysis.ranks.beginner'), color: '#9E9E9E' };
+  if (score >= 24000) return { title: t('analysis.ranks.legend'), color: '#FF0000' };
+  if (score >= 20000) return { title: t('analysis.ranks.master'), color: '#FF8000' };
+  if (score >= 15000) return { title: t('analysis.ranks.explorer'), color: '#C0C000' };
+  if (score >= 10000) return { title: t('analysis.ranks.voyager'), color: '#0000FF' };
+  if (score >= 5000) return { title: t('analysis.ranks.traveler'), color: '#00C0C0' };
+  return { title: t('analysis.ranks.beginner'), color: '#008000' };
 });
 
 const initMaps = async () => {
@@ -174,6 +176,7 @@ const initMaps = async () => {
 
 const fetchGame = async () => {
   loading.value = true;
+  error.value = null;
   try {
     const res = await api.get(`/games/${route.params.id}`);
     game.value = res.data;
@@ -184,6 +187,7 @@ const fetchGame = async () => {
     });
   } catch (err) {
     console.error(err);
+    error.value = err.response?.data?.error || t('analysis.not_found');
   } finally {
     loading.value = false;
   }

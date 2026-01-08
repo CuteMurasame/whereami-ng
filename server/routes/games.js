@@ -262,6 +262,11 @@ router.get('/:id', auth, async (req, res) => {
         });
 
         if (!game) return res.status(404).json({ error: "Game not found" });
+
+        // Disable analysis for ongoing singleplayer games
+        if (game.type === 'singleplayer' && game.status !== 'finished') {
+            return res.status(403).json({ error: "Analysis available only after finishing the game" });
+        }
         
         res.json(game);
     } catch (err) {

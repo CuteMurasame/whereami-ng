@@ -24,3 +24,9 @@ Thumbs.db
 # User uploads
 server/uploads/
 reference_project/
+
+# other files
+misc/
+add_column.js
+migrate.js
+test_game_query.js

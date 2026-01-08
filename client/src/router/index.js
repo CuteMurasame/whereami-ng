@@ -17,6 +17,7 @@ import AuthCallbackView from '../views/AuthCallbackView.vue';
 import MapsView from '../views/MapsView.vue';
 import MapEditorView from '../views/MapEditorView.vue';
 import MapDetailView from '../views/MapDetailView.vue';
+import StatisticsView from '../views/StatisticsView.vue';
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -57,6 +58,12 @@ const router = createRouter({
       name: 'lobby', 
       component: LobbyView,
       meta: { requiresAuth: true } // Custom flag: Must be logged in
+    },
+    {
+      path: '/statistics',
+      name: 'statistics',
+      component: StatisticsView,
+      meta: { requiresAuth: true }
     },
     { 
       path: '/singleplayer', 

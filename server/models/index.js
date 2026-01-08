@@ -56,7 +56,8 @@ const Location = sequelize.define('Location', {
     pano_id: { type: DataTypes.STRING, allowNull: false },
     lat: { type: DataTypes.DOUBLE, allowNull: false },
     lng: { type: DataTypes.DOUBLE, allowNull: false },
-    country_code: { type: DataTypes.STRING(5) } // Useful for Country Streak mode
+    country_code: { type: DataTypes.STRING(5) }, // Useful for Country Streak mode
+    is_deleted: { type: DataTypes.BOOLEAN, defaultValue: false }
 }, {
 	tableName: 'locations',
 	timestamps: false

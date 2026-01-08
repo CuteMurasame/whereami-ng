@@ -17,7 +17,17 @@ export default {
     updatedAt: "Updated At",
     yes: "Yes",
     no: "No",
-    close: "Close"
+    close: "Close",
+    processing: "Processing...",
+    processed: "Processed",
+    deleted: "Deleted",
+    progress: "Progress",
+    updated: "Updated",
+    failed: "Failed",
+    completed: "Completed",
+    success: "Success",
+    confirm_undone: "Are you sure? This cannot be undone.",
+    operation_failed_retry: "Operation failed after retries: {message}"
   },
   nav: {
     lobby: "Lobby",
@@ -66,7 +76,35 @@ export default {
     map_deleted: "Map deleted successfully",
     random_view: "Random Street View",
     no_locations_play: "No locations available to play.",
-    no_scores: "No scores yet. Be the first!"
+    no_scores: "No scores yet. Be the first!",
+    trash_empty: "Trash is empty",
+    checking_availability: "Checking Availability...",
+    refreshing_locations: "Refreshing Locations...",
+    vali_json_title: "Vali JSON Import/Export",
+    vali_json_help: "Import/Export JSON compatible with Vali",
+    import_json: "Import JSON",
+    export_json: "Export JSON",
+    check_availability_confirm: "This will check all locations against Google Street View API. Invalid locations will be moved to Recycle Bin. Continue?",
+    check_complete_msg: "Finished! Moved to trash: {count}",
+    refresh_complete_msg: "Finished! Updated: {updated}, Failed: {failed}",
+    restore_failed: "Failed to restore",
+    empty_trash_success: "Deleted {count} locations forever.",
+    empty_trash_failed: "Failed to empty trash",
+    read_file_failed: "Failed to read file",
+    import_failed: "Invalid JSON or API Error",
+    import_success: "Imported {count} locations",
+    export_failed: "Failed to export",
+    check_btn_title: "Check Availability (Bulk Delete Invalid)"
+  },
+  statistics: {
+    title: "Statistics",
+    subtitle: "Track your progress and performance",
+    games_played: "Games Played",
+    avg_score: "Avg Score",
+    best_score: "Best Score",
+    total_score: "Total Score",
+    mode_breakdown: "Mode Breakdown",
+    no_data: "No data available yet."
   },
   singleplayer: {
     setup_title: "Singleplayer Setup",
@@ -109,6 +147,7 @@ export default {
       legend: "LEGEND",
       master: "MASTER",
       explorer: "EXPLORER",
+      voyager: "VOYAGER",
       traveler: "TRAVELER",
       beginner: "BEGINNER"
     }

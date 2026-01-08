@@ -51,9 +51,11 @@
             <i class="fa-solid fa-gear"></i> {{ t('nav.settings') }}
           </button>
 
-          <button class="nav-item disabled">
-            <i class="fa-solid fa-chart-pie"></i> Statistics
-            <span class="coming-soon">{{ t('lobby.soon') }}</span>
+          <button 
+            @click="router.push('/statistics')" 
+            :class="['nav-item', page === 'statistics' ? 'active' : '']"
+          >
+            <i class="fa-solid fa-chart-pie"></i> {{ t('statistics.title') }}
           </button>
 
           <button 
