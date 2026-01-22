@@ -101,15 +101,7 @@ router.post('/start', auth, async (req, res) => {
             const shuffled = allLocs.sort(() => 0.5 - Math.random());
             locations = shuffled.slice(0, 5);
         } else {
-            // Classic World (Random from all locations? Or specific logic?)
-            // For now, let's pick 5 random locations from ALL locations in DB
-            // Ideally, this should use a curated "World" map, but we'll use all for now.
-             const allLocs = await Location.findAll({ attributes: ['id'] });
-             if (allLocs.length < 5) {
-                return res.status(400).json({ error: 'Not enough locations in database' });
-            }
-            const shuffled = allLocs.sort(() => 0.5 - Math.random());
-            locations = shuffled.slice(0, 5);
+            return res.status(400).json({ error: 'Invalid map' });
         }
 
         // Create Game
