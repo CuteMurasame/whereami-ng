@@ -54,6 +54,7 @@ import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { api, authState } from '../auth';
 import DashboardLayout from '../components/DashboardLayout.vue';
+import { formatLocaleDate } from '../utils/dateFormat';
 
 const { t } = useI18n();
 const router = useRouter();
@@ -71,7 +72,7 @@ const canEdit = (map) => {
 };
 
 const formatDate = (dateStr) => {
-  return new Date(dateStr).toLocaleDateString();
+  return formatLocaleDate(dateStr);
 };
 
 const fetchMaps = async () => {
@@ -90,39 +91,39 @@ onMounted(fetchMaps);
 
 <style scoped>
 .content-header { 
-  padding: 2rem 3rem; 
+  padding: var(--page-y) var(--page-x); 
   border-bottom: 1px solid var(--color-border); 
   display: flex; 
   justify-content: space-between; 
   align-items: center; 
 }
-.header-title h2 { font-size: 1.5rem; margin-bottom: 4px; }
+.header-title h2 { font-size: 1.34rem; line-height: 1.1; margin: 0 0 3px; font-weight: 700; letter-spacing: -.02em; }
 .header-title p { color: var(--color-text-muted); margin: 0; }
 
-.scroll-content { padding: 2rem 3rem; overflow-y: auto; flex: 1; }
+.scroll-content { padding: var(--page-y) var(--page-x); overflow-y: auto; flex: 1; background: var(--color-page, var(--color-bg)); }
 
 .create-btn { width: auto; }
 
 .loading, .empty-state { text-align: center; padding: 4rem; color: var(--color-text-muted); }
 .empty-state i { font-size: 3rem; margin-bottom: 1rem; opacity: 0.5; }
 
-.maps-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1.5rem; }
+.maps-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: .9rem; width: 100%; }
 
 .map-card {
   background: var(--color-bg); border: 1px solid var(--color-border); border-radius: var(--radius);
-  padding: 1.5rem; display: flex; justify-content: space-between; align-items: flex-start;
+  padding: var(--card-pad); display: flex; justify-content: space-between; align-items: flex-start;
   transition: all 0.2s;
 }
-.map-card:hover { border-color: var(--color-primary); box-shadow: var(--shadow-sm); transform: translateY(-2px); }
+.map-card:hover { border-color: var(--color-primary); box-shadow: var(--shadow-card); transform: translateY(-2px); }
 
 .map-info { flex: 1; min-width: 0; }
 .map-header { display: flex; align-items: center; gap: 10px; margin-bottom: 0.5rem; }
-.map-header h3 { margin: 0; font-size: 1.1rem; font-weight: 700; color: var(--color-text-main); }
+.map-header h3 { margin: 0; font-size: 1.02rem; font-weight: 700; color: var(--color-text-main); }
 
 .badge { font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; font-weight: 600; text-transform: uppercase; }
 .badge.official { background: rgba(51, 187, 173, 0.1); color: var(--color-accent); }
 
-.description { color: var(--color-text-muted); font-size: 0.9rem; margin-bottom: 1rem; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.description { color: var(--color-text-muted); font-size: 0.86rem; margin-bottom: .7rem; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 
 .meta { display: flex; gap: 1rem; font-size: 0.8rem; color: var(--color-text-muted); }
 .meta span { display: flex; align-items: center; gap: 5px; }

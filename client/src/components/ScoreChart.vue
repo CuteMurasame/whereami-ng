@@ -1,5 +1,8 @@
 <template>
-  <div class="rating-chart-container">
+  <div class="rating-chart-container" :class="{ expanded: isExpanded }">
+    <button type="button" class="chart-expand-btn" @click="isExpanded = !isExpanded" :aria-label="isExpanded ? 'Close expanded chart' : 'Expand chart'">
+      <i :class="isExpanded ? 'fa-solid fa-compress' : 'fa-solid fa-expand'"></i>
+    </button>
     <div class="chart-header">
       <div class="mode-tabs">
         <button 
@@ -21,6 +24,7 @@
 import { onMounted, watch, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { api } from '../auth';
+import { formatLocaleDate } from '../utils/dateFormat';
 
 const { t } = useI18n();
 const props = defineProps({
@@ -31,6 +35,7 @@ const props = defineProps({
 });
 
 const chartMode = ref('moving');
+const isExpanded = ref(false);
 
 onMounted(() => {
   const loadCreateJS = () => {
@@ -384,7 +389,7 @@ onMounted(() => {
         rating_text.color = color;
         place_text.text = place ? place.toUpperCase() : '';
         diff_text.text = ''; 
-        date_text.text = date.toLocaleDateString();
+        date_text.text = formatLocaleDate(date);
         contest_name_text.text = contest_name;
         if (particle_flag) {
             let alpha = 1;
@@ -490,6 +495,43 @@ onMounted(() => {
   border-radius: 8px;
   box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
+
+.rating-chart-container {
+  position: relative;
+}
+.chart-expand-btn {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 3;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+  background: rgba(255,255,255,.92);
+  color: #111827;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 2px 8px rgba(0,0,0,.12);
+}
+.rating-chart-container.expanded {
+  position: fixed;
+  inset: 24px;
+  z-index: 10000;
+  max-width: none;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  background: #fff;
+}
+.rating-chart-container.expanded canvas {
+  max-width: none !important;
+  max-height: none !important;
+  width: min(100%, 1280px) !important;
+}
+
 canvas {
   display: block;
   margin: 0 auto;

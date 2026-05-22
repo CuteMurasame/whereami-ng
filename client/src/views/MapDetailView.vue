@@ -2,7 +2,7 @@
   <DashboardLayout page="maps">
     <header class="content-header">
       <div class="header-left">
-        <button @click="router.push('/maps')" class="back-link">
+        <button @click="goBack" class="back-link">
           <i class="fa-solid fa-arrow-left"></i>
         </button>
         <div class="header-title">
@@ -166,10 +166,16 @@ import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { api, authState } from '../auth';
 import DashboardLayout from '../components/DashboardLayout.vue';
+import { formatLocaleDate } from '../utils/dateFormat';
 
 const { t } = useI18n();
 const route = useRoute();
 const router = useRouter();
+
+const goBack = () => {
+  if (window.history.length > 1) router.back();
+  else router.push('/maps');
+};
 
 const map = ref({});
 const locations = ref([]);
@@ -195,7 +201,7 @@ const canEdit = computed(() => {
 
 const formatDate = (dateStr) => {
   if (!dateStr) return '';
-  return new Date(dateStr).toLocaleDateString();
+  return formatLocaleDate(dateStr);
 };
 
 const fetchMapDetails = async () => {
@@ -284,13 +290,13 @@ onMounted(async () => {
 
 <style scoped>
 .content-header { 
-  padding: 2rem 3rem; 
+  padding: var(--page-y) var(--page-x); 
   border-bottom: 1px solid var(--color-border); 
   display: flex; 
   justify-content: space-between;
   align-items: center; 
 }
-.header-left { display: flex; align-items: center; gap: 1.5rem; }
+.header-left { display: flex; align-items: center; gap: 1rem; }
 .back-link { 
   background: var(--color-surface); border: 1px solid var(--color-border); 
   width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
@@ -298,23 +304,23 @@ onMounted(async () => {
 }
 .back-link:hover { color: var(--color-primary); border-color: var(--color-primary); }
 
-.header-title h2 { font-size: 1.8rem; margin: 0 0 0.5rem 0; }
+.header-title h2 { font-size: 1.34rem; line-height: 1.1; margin: 0 0 .25rem 0; font-weight: 700; letter-spacing: -.02em; }
 .subtitle { display: flex; align-items: center; gap: 1rem; color: var(--color-text-muted); font-size: 0.9rem; }
 .subtitle span { display: flex; align-items: center; gap: 5px; }
 
 .badge { font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; font-weight: 600; text-transform: uppercase; }
 .badge.official { background: rgba(51, 187, 173, 0.1); color: var(--color-accent); }
 
-.scroll-content { padding: 2rem 3rem; overflow-y: auto; flex: 1; }
-.detail-container { max-width: 1000px; margin: 0 auto; display: flex; flex-direction: column; gap: 2rem; }
+.scroll-content { padding: var(--page-y) var(--page-x); overflow-y: auto; flex: 1; background: var(--color-page, var(--color-bg)); }
+.detail-container { max-width: 1320px; margin: 0; display: flex; flex-direction: column; gap: 1rem; }
 
 .card { 
   background: var(--color-bg); border: 1px solid var(--color-border); 
-  border-radius: var(--radius); padding: 1.5rem; 
+  border-radius: var(--radius); padding: var(--card-pad); 
 }
 
 .info-card h3 { margin-top: 0; font-size: 1.1rem; margin-bottom: 1rem; }
-.description { line-height: 1.6; color: var(--color-text-main); white-space: pre-wrap; margin-bottom: 1.5rem; }
+.description { line-height: 1.6; color: var(--color-text-main); white-space: pre-wrap; margin-bottom: 1rem; }
 
 .play-actions { border-top: 1px solid var(--color-border); padding-top: 1.5rem; }
 .play-btn { max-width: 250px; background-color: var(--color-accent); }
@@ -322,7 +328,7 @@ onMounted(async () => {
 
 /* List Card */
 .list-card { padding: 0; overflow: hidden; display: flex; flex-direction: column; }
-.list-header { padding: 1.5rem; border-bottom: 1px solid var(--color-border); }
+.list-header { padding: var(--card-pad); border-bottom: 1px solid var(--color-border); }
 .list-header h3 { margin: 0; }
 
 .table-wrapper { overflow-x: auto; }
@@ -350,7 +356,7 @@ onMounted(async () => {
 .view-btn:hover { color: var(--color-primary); background: rgba(79, 70, 229, 0.1); }
 
 .pagination { 
-  padding: 1rem; border-top: 1px solid var(--color-border); 
+  padding: .8rem .9rem; border-top: 1px solid var(--color-border); 
   display: flex; justify-content: center; align-items: center; gap: 1rem; 
 }
 .page-btn {

@@ -4,6 +4,16 @@ const { Map, Location, User, sequelize } = require('../models');
 const { resolveLocation, refreshLocationMetadata, checkPanoAvailability } = require('../utils/geoUtils');
 const auth = require('../middleware/auth');
 
+const canManageMap = (user, map) => !!(
+    user && (user.is_root || (user.is_admin && map.creator_id === user.id))
+);
+
+const parsePagination = (page = 1, limit = 50, maxLimit = 100) => {
+    const parsedPage = Math.max(parseInt(page, 10) || 1, 1);
+    const parsedLimit = Math.min(Math.max(parseInt(limit, 10) || 50, 1), maxLimit);
+    return { page: parsedPage, limit: parsedLimit, offset: (parsedPage - 1) * parsedLimit };
+};
+
 // Helper to process locations string
 const processLocations = async (locationsStr) => {
     if (!locationsStr) return [];
@@ -42,6 +52,34 @@ router.get('/', async (req, res) => {
     }
 });
 
+
+// Get playable maps with safe location counts for game setup screens
+router.get('/playable', auth, async (req, res) => {
+    try {
+        const where = {};
+        if (req.query.is_singleplayer === 'true') where.is_singleplayer = true;
+
+        const maps = await Map.findAll({
+            where,
+            include: [{ model: User, attributes: ['username'] }],
+            order: [['is_official', 'DESC'], ['name', 'ASC']]
+        });
+
+        const withCounts = await Promise.all(maps.map(async (map) => {
+            const locationCount = await Location.count({ where: { map_id: map.id, is_deleted: false } });
+            return {
+                ...map.toJSON(),
+                locationCount,
+                playable: locationCount >= 5
+            };
+        }));
+
+        res.json(withCounts);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // Get Single Map
 router.get('/:id', async (req, res) => {
     try {
@@ -51,7 +89,7 @@ router.get('/:id', async (req, res) => {
         if (!map) return res.status(404).json({ error: 'Map not found' });
         
         // Get location count
-        const locationCount = await Location.count({ where: { map_id: map.id } });
+        const locationCount = await Location.count({ where: { map_id: map.id, is_deleted: false } });
         
         res.json({ ...map.toJSON(), locationCount });
     } catch (err) {
@@ -69,8 +107,8 @@ router.get('/:id/random', async (req, res) => {
         // Note: For large datasets, this might be slow on some DBs, but fine for now.
         // Sequelize doesn't have a universal random(), so we'll fetch IDs and pick one.
         const locations = await Location.findAll({ 
-            where: { map_id: map.id },
-            attributes: ['id', 'pano_id', 'lat', 'lng']
+            where: { map_id: map.id, is_deleted: false },
+            attributes: ['id', 'pano_id']
         });
 
         if (locations.length === 0) {
@@ -86,25 +124,31 @@ router.get('/:id/random', async (req, res) => {
 });
 
 // Get Map Locations (Paginated)
-router.get('/:id/locations', async (req, res) => {
+router.get('/:id/locations', auth, async (req, res) => {
     try {
-        const { page = 1, limit = 50 } = req.query;
-        const offset = (page - 1) * limit;
+        const map = await Map.findByPk(req.params.id);
+        if (!map) return res.status(404).json({ error: 'Map not found' });
+
+        if (!canManageMap(req.user, map)) {
+            return res.status(403).json({ error: 'Access Denied' });
+        }
+
+        const { page, limit, offset } = parsePagination(req.query.page, req.query.limit);
         
         const locations = await Location.findAndCountAll({
             where: { 
                 map_id: req.params.id,
                 is_deleted: false 
             },
-            limit: parseInt(limit),
-            offset: parseInt(offset),
+            limit,
+            offset,
             order: [['id', 'DESC']]
         });
         
         res.json({
             locations: locations.rows,
             total: locations.count,
-            page: parseInt(page),
+            page,
             totalPages: Math.ceil(locations.count / limit)
         });
     } catch (err) {
@@ -119,7 +163,7 @@ router.get('/:id/deleted-locations', auth, async (req, res) => {
         if (!map) return res.status(404).json({ error: 'Map not found' });
 
         // Permission check
-        if (!req.user.is_admin && !req.user.is_root && map.creator_id !== req.user.id) {
+        if (!canManageMap(req.user, map)) {
             return res.status(403).json({ error: 'Access Denied' });
         }
 
@@ -143,7 +187,7 @@ router.post('/:id/restore-location/:locationId', auth, async (req, res) => {
         const map = await Map.findByPk(req.params.id);
         if (!map) return res.status(404).json({ error: 'Map not found' });
 
-        if (!req.user.is_admin && !req.user.is_root && map.creator_id !== req.user.id) {
+        if (!canManageMap(req.user, map)) {
             return res.status(403).json({ error: 'Access Denied' });
         }
 
@@ -168,7 +212,7 @@ router.delete('/:id/empty-trash', auth, async (req, res) => {
         const map = await Map.findByPk(req.params.id);
         if (!map) return res.status(404).json({ error: 'Map not found' });
 
-        if (!req.user.is_admin && !req.user.is_root && map.creator_id !== req.user.id) {
+        if (!canManageMap(req.user, map)) {
             return res.status(403).json({ error: 'Access Denied' });
         }
 
@@ -191,7 +235,7 @@ router.get('/:id/check-availability', auth, async (req, res) => {
         const map = await Map.findByPk(req.params.id);
         if (!map) return res.status(404).json({ error: 'Map not found' });
 
-        if (!req.user.is_admin && !req.user.is_root && map.creator_id !== req.user.id) {
+        if (!canManageMap(req.user, map)) {
             return res.status(403).json({ error: 'Access Denied' });
         }
 
@@ -339,21 +383,22 @@ router.delete('/:id/locations/:locationId', auth, async (req, res) => {
         if (!map) return res.status(404).json({ error: 'Map not found' });
 
         // Permission check
-        const isCreator = req.user.is_admin && map.creator_id === req.user.id;
-        const isRoot = req.user.is_root;
-
-        if (!isCreator && !isRoot) {
+        if (!canManageMap(req.user, map)) {
             return res.status(403).json({ error: 'Access Denied' });
         }
 
-        const deleted = await Location.destroy({
-            where: { 
-                id: req.params.locationId,
-                map_id: map.id
+        const [updated] = await Location.update(
+            { is_deleted: true },
+            {
+                where: { 
+                    id: req.params.locationId,
+                    map_id: map.id,
+                    is_deleted: false
+                }
             }
-        });
+        );
 
-        if (deleted) {
+        if (updated) {
             res.json({ success: true });
         } else {
             res.status(404).json({ error: 'Location not found' });
@@ -489,10 +534,7 @@ router.put('/:id', auth, async (req, res) => {
         if (!map) return res.status(404).json({ error: 'Map not found' });
 
         // Permission check
-        const isCreator = req.user.is_admin && map.creator_id === req.user.id;
-        const isRoot = req.user.is_root;
-
-        if (!isCreator && !isRoot) {
+        if (!canManageMap(req.user, map)) {
             return res.status(403).json({ error: 'Access Denied' });
         }
 
@@ -517,10 +559,7 @@ router.delete('/:id', auth, async (req, res) => {
         if (!map) return res.status(404).json({ error: 'Map not found' });
 
         // Permission check
-        const isCreator = req.user.is_admin && map.creator_id === req.user.id;
-        const isRoot = req.user.is_root;
-
-        if (!isCreator && !isRoot) {
+        if (!canManageMap(req.user, map)) {
             return res.status(403).json({ error: 'Access Denied' });
         }
 
@@ -542,10 +581,7 @@ router.post('/:id/locations', auth, async (req, res) => {
         if (!map) return res.status(404).json({ error: 'Map not found' });
 
         // Permission check
-        const isCreator = req.user.is_admin && map.creator_id === req.user.id;
-        const isRoot = req.user.is_root;
-
-        if (!isCreator && !isRoot) {
+        if (!canManageMap(req.user, map)) {
             return res.status(403).json({ error: 'Access Denied' });
         }
 
@@ -576,10 +612,7 @@ router.post('/:id/import-vali', auth, async (req, res) => {
         if (!map) return res.status(404).json({ error: 'Map not found' });
 
         // Permission check
-        const isCreator = req.user.is_admin && map.creator_id === req.user.id;
-        const isRoot = req.user.is_root;
-
-        if (!isCreator && !isRoot) {
+        if (!canManageMap(req.user, map)) {
             return res.status(403).json({ error: 'Access Denied' });
         }
 
@@ -622,10 +655,7 @@ router.get('/:id/export-vali', auth, async (req, res) => {
         if (!map) return res.status(404).json({ error: 'Map not found' });
 
         // Permission check
-        const isCreator = req.user.is_admin && map.creator_id === req.user.id;
-        const isRoot = req.user.is_root;
-
-        if (!isCreator && !isRoot) {
+        if (!canManageMap(req.user, map)) {
             return res.status(403).json({ error: 'Access Denied' });
         }
 
@@ -655,15 +685,22 @@ router.get('/:id/export-vali', auth, async (req, res) => {
 router.get('/:id/leaderboard', async (req, res) => {
     try {
         const { id } = req.params;
-        const { mode = 'moving', page = 1, limit = 50 } = req.query;
-        const offset = (page - 1) * limit;
+        const { mode = 'moving' } = req.query;
+        const { limit, offset } = parsePagination(req.query.page, req.query.limit);
+
+        if (!['moving', 'nm', 'nmpz'].includes(mode)) {
+            return res.status(400).json({ error: 'Invalid mode' });
+        }
 
         const query = `
             SELECT 
                 t.user_id as userId,
                 u.username, 
                 u.avatar_url, 
-                u.email,
+                CASE
+                    WHEN u.email IS NULL THEN NULL
+                    ELSE MD5(LOWER(TRIM(u.email)))
+                END as email_hash,
                 t.max_score, 
                 MAX(g.created_at) as achieved_at,
                 MAX(g.id) as game_id
@@ -675,7 +712,7 @@ router.get('/:id/leaderboard', async (req, res) => {
             ) t
             JOIN games g ON g.user_id = t.user_id AND g.total_score = t.max_score AND g.map_id = :mapId AND g.mode = :mode
             JOIN users u ON t.user_id = u.id
-            GROUP BY t.user_id
+            GROUP BY t.user_id, u.username, u.avatar_url, u.email, t.max_score
             ORDER BY t.max_score DESC
             LIMIT :limit OFFSET :offset
         `;
@@ -684,8 +721,8 @@ router.get('/:id/leaderboard', async (req, res) => {
             replacements: { 
                 mapId: id, 
                 mode, 
-                limit: parseInt(limit), 
-                offset: parseInt(offset) 
+                limit, 
+                offset
             },
             type: sequelize.QueryTypes.SELECT
         });

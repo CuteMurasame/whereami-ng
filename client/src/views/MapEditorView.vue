@@ -2,7 +2,7 @@
   <DashboardLayout page="maps">
     <header class="content-header">
       <div class="header-left">
-        <button @click="router.push('/maps')" class="back-link">
+        <button @click="goBack" class="back-link">
           <i class="fa-solid fa-arrow-left"></i>
         </button>
         <div class="header-title">
@@ -301,6 +301,11 @@ import Swal from 'sweetalert2';
 const { t } = useI18n();
 const route = useRoute();
 const router = useRouter();
+
+const goBack = () => {
+  if (window.history.length > 1) router.back();
+  else router.push('/maps');
+};
 
 const user = computed(() => authState.user);
 const isRoot = computed(() => user.value?.is_root);
@@ -688,12 +693,12 @@ const handleDeleteMap = async (e) => {
 
 <style scoped>
 .content-header { 
-  padding: 2rem 3rem; 
+  padding: var(--page-y) var(--page-x); 
   border-bottom: 1px solid var(--color-border); 
   display: flex; 
   align-items: center; 
 }
-.header-left { display: flex; align-items: center; gap: 1.5rem; }
+.header-left { display: flex; align-items: center; gap: 1rem; }
 .back-link { 
   background: var(--color-surface); border: 1px solid var(--color-border); 
   width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
@@ -703,7 +708,7 @@ const handleDeleteMap = async (e) => {
 .header-title h2 { font-size: 1.5rem; margin: 0; }
 .header-title p { color: var(--color-text-muted); margin: 0; font-size: 0.9rem; }
 
-.scroll-content { padding: 2rem 3rem; overflow-y: auto; flex: 1; }
+.scroll-content { padding: var(--page-y) var(--page-x); overflow-y: auto; flex: 1; }
 
 /* Create Mode Container */
 .create-container { max-width: 800px; margin: 0 auto; }
@@ -712,16 +717,16 @@ const handleDeleteMap = async (e) => {
 .editor-grid { 
   display: grid; 
   grid-template-columns: 350px 1fr; 
-  gap: 2rem; 
+  gap: 1.15rem; 
   height: 100%;
 }
 
-.editor-sidebar { display: flex; flex-direction: column; gap: 1.5rem; }
+.editor-sidebar { display: flex; flex-direction: column; gap: 1rem; }
 .editor-main { display: flex; flex-direction: column; min-width: 0; }
 
 .card { 
   background: var(--color-bg); border: 1px solid var(--color-border); 
-  border-radius: var(--radius); padding: 1.5rem; 
+  border-radius: var(--radius); padding: var(--card-pad); 
 }
 
 .form-card h3, .list-card h3 { margin-top: 0; font-size: 1.1rem; margin-bottom: 1rem; }
@@ -764,7 +769,7 @@ const handleDeleteMap = async (e) => {
 
 /* List Card */
 .list-card { flex: 1; display: flex; flex-direction: column; padding: 0; overflow: hidden; }
-.list-header { padding: 1.5rem; border-bottom: 1px solid var(--color-border); display: flex; justify-content: space-between; align-items: center; }
+.list-header { padding: var(--card-pad); border-bottom: 1px solid var(--color-border); display: flex; justify-content: space-between; align-items: center; }
 .list-header h3 { margin: 0; }
 .header-actions { display: flex; gap: 10px; }
 
@@ -795,7 +800,7 @@ const handleDeleteMap = async (e) => {
 .refresh-all-btn:hover { color: var(--color-accent-hover); background: rgba(51, 187, 173, 0.1); }
 
 .pagination { 
-  padding: 1rem; border-top: 1px solid var(--color-border); 
+  padding: .8rem .9rem; border-top: 1px solid var(--color-border); 
   display: flex; justify-content: center; align-items: center; gap: 1rem; 
 }
 .page-btn {
@@ -850,11 +855,11 @@ input:focus, textarea:focus {
   background: var(--color-bg); padding: 2rem; border-radius: var(--radius);
   width: 400px; max-width: 90%; box-shadow: 0 4px 20px rgba(0,0,0,0.2);
 }
-.modal-content h3 { margin-top: 0; margin-bottom: 1.5rem; text-align: center; }
+.modal-content h3 { margin-top: 0; margin-bottom: 1rem; text-align: center; }
 
 .progress-bar-container {
   height: 10px; background: var(--color-surface); border-radius: 5px;
-  overflow: hidden; margin-bottom: 1.5rem; border: 1px solid var(--color-border);
+  overflow: hidden; margin-bottom: 1rem; border: 1px solid var(--color-border);
 }
 .progress-bar {
   height: 100%; background: var(--color-primary); transition: width 0.3s ease;

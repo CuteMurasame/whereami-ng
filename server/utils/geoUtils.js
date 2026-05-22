@@ -1,7 +1,6 @@
 const axios = require('axios');
 
-// API Key provided by user
-const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY || 'AIzaSyDIEaV68VV16To1fjfUbD-4Bz7JxkIpfGU';
+const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
 
 // Example input: https://www.google.com/maps/@35.6585805,139.7454329,3a,75y,90t/data=!3m6!1e1!3m4!1sPANO_ID_HERE!2e0!7i13312!8i6656
 function parseGoogleMapsLink(input) {

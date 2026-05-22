@@ -5,7 +5,7 @@ const { User } = require('../models');
 passport.use(new GoogleStrategy({
     clientID: process.env.GOOGLE_CLIENT_ID || 'PLACEHOLDER_ID',
     clientSecret: process.env.GOOGLE_CLIENT_SECRET || 'PLACEHOLDER_SECRET',
-    callbackURL: "/api/auth/google/callback"
+    callbackURL: process.env.GOOGLE_CALLBACK_URL || "/api/auth/google/callback"
   },
   async function(accessToken, refreshToken, profile, cb) {
     try {
@@ -20,7 +20,7 @@ passport.use(new GoogleStrategy({
       // We don't create the user yet because we need them to set a username/password
       return cb(null, {
           google_id: profile.id,
-          email: profile.emails[0].value,
+          email: profile.emails?.[0]?.value || null,
           is_new_google_user: true
       });
 

@@ -116,13 +116,16 @@
             </label>
           </div>
 
-          <div class="setting-card disabled">
+          <div class="setting-card" :class="{ warning: settings.maintenance_mode }">
             <div class="s-icon"><i class="fa-solid fa-server"></i></div>
             <div class="s-info">
               <h4>{{ t('admin.maintenanceMode') }}</h4>
               <p>{{ t('admin.maintenanceModeDesc') }}</p>
             </div>
-            <span class="coming-soon">{{ t('lobby.soon') }}</span>
+            <label class="switch">
+              <input type="checkbox" v-model="settings.maintenance_mode" @change="toggleMaintenance">
+              <span class="slider"></span>
+            </label>
           </div>
         </div>
 
@@ -138,13 +141,14 @@ import { ref, onMounted, computed } from 'vue';
 import { api, authState } from '../auth';
 import { useI18n } from 'vue-i18n';
 import Swal from 'sweetalert2';
+import { setMaintenanceStatusCache } from '../router';
 
 // Force update
 const { t } = useI18n();
 // State
 const activeTab = ref('users');
 const users = ref([]);
-const settings = ref({ email_enabled: false });
+const settings = ref({ email_enabled: false, maintenance_mode: false });
 const currentPage = ref(1);
 const itemsPerPage = 50;
 
@@ -252,6 +256,30 @@ const toggleEmail = async () => {
   catch (e) { settings.value.email_enabled = !settings.value.email_enabled; } // Revert
 };
 
+const toggleMaintenance = async () => {
+  try {
+    const res = await api.post('/settings/toggle-maintenance', { enabled: settings.value.maintenance_mode });
+    settings.value = res.data.settings;
+    setMaintenanceStatusCache(settings.value.maintenance_mode);
+    Swal.fire({
+      title: t('admin.updatedTitle'),
+      text: settings.value.maintenance_mode ? t('admin.maintenanceEnabled') : t('admin.maintenanceDisabled'),
+      icon: settings.value.maintenance_mode ? 'warning' : 'success',
+      timer: 1800,
+      showConfirmButton: false,
+      toast: true,
+      position: 'top-end'
+    });
+  } catch (e) {
+    settings.value.maintenance_mode = !settings.value.maintenance_mode; // Revert
+    Swal.fire({
+      title: t('admin.error'),
+      text: e.response?.data?.error || 'Failed to update maintenance mode.',
+      icon: 'error'
+    });
+  }
+};
+
 onMounted(() => {
   fetchUsers();
   fetchSettings();
@@ -334,6 +362,7 @@ th { background: var(--color-surface); font-size: 0.75rem; text-transform: upper
 .settings-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; }
 .setting-card { background: var(--color-bg); padding: 1.5rem; border: 1px solid var(--color-border); border-radius: var(--radius); display: flex; align-items: center; gap: 15px; }
 .setting-card.disabled { opacity: 0.6; }
+.setting-card.warning { border-color: rgba(245, 158, 11, 0.45); background: rgba(245, 158, 11, 0.08); }
 
 .s-icon { width: 40px; height: 40px; background: var(--color-surface); border-radius: 8px; display: flex; align-items: center; justify-content: center; color: var(--color-text-muted); font-size: 1.1rem; }
 .s-info { flex: 1; }

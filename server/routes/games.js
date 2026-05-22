@@ -1,8 +1,9 @@
 const express = require('express');
 const router = express.Router();
-const { Game, Guess, Map, Location, User } = require('../models');
+const { Game, Guess, Map, Location, User, sequelize } = require('../models');
 const auth = require('../middleware/auth');
 const { Op } = require('sequelize');
+const { wgs84DistanceMeters, calculateGeoScore } = require('../utils/scoring');
 
 // Get Active Game
 router.get('/active', auth, async (req, res) => {
@@ -89,7 +90,7 @@ router.post('/start', auth, async (req, res) => {
             // Get 5 random locations
             // Note: Sequelize random is DB specific. Using simple shuffle for now.
             const allLocs = await Location.findAll({ 
-                where: { map_id: mapId },
+                where: { map_id: mapId, is_deleted: false },
                 attributes: ['id']
             });
             
@@ -101,7 +102,15 @@ router.post('/start', auth, async (req, res) => {
             const shuffled = allLocs.sort(() => 0.5 - Math.random());
             locations = shuffled.slice(0, 5);
         } else {
-            return res.status(400).json({ error: 'Invalid map' });
+            // Classic World (Random from all locations? Or specific logic?)
+            // For now, let's pick 5 random locations from ALL locations in DB
+            // Ideally, this should use a curated "World" map, but we'll use all for now.
+             const allLocs = await Location.findAll({ where: { is_deleted: false }, attributes: ['id'] });
+             if (allLocs.length < 5) {
+                return res.status(400).json({ error: 'Not enough locations in database' });
+            }
+            const shuffled = allLocs.sort(() => 0.5 - Math.random());
+            locations = shuffled.slice(0, 5);
         }
 
         // Create Game
@@ -146,94 +155,110 @@ router.post('/:id/guess', auth, async (req, res) => {
     try {
         const { round, lat, lng } = req.body;
         const gameId = req.params.id;
+        const roundNumber = parseInt(round, 10);
+        const latNum = Number(lat);
+        const lngNum = Number(lng);
 
-        const game = await Game.findByPk(gameId);
-        if (!game || game.user_id !== req.user.id) {
-            return res.status(404).json({ error: 'Game not found' });
+        if (!Number.isInteger(roundNumber) || roundNumber < 1 || roundNumber > 5) {
+            return res.status(400).json({ error: 'Invalid round' });
         }
 
-        if (game.status === 'finished') {
-            return res.status(400).json({ error: 'Game already finished' });
+        if (!Number.isFinite(latNum) || !Number.isFinite(lngNum) || latNum < -90 || latNum > 90 || lngNum < -180 || lngNum > 180) {
+            return res.status(400).json({ error: 'Invalid coordinates' });
         }
 
-        // Find current round guess record
-        const currentGuess = await Guess.findOne({
-            where: { game_id: gameId, round_number: round },
-            include: [Location]
-        });
-
-        if (!currentGuess) {
-            return res.status(404).json({ error: 'Round not found' });
-        }
-
-        if (currentGuess.guess_lat) {
-            return res.status(400).json({ error: 'Round already played' });
-        }
-
-        // Calculate Score
-        const actualLat = currentGuess.Location.lat;
-        const actualLng = currentGuess.Location.lng;
-        
-        // Haversine Distance
-        const R = 6371e3; // metres
-        const φ1 = actualLat * Math.PI/180;
-        const φ2 = lat * Math.PI/180;
-        const Δφ = (lat-actualLat) * Math.PI/180;
-        const Δλ = (lng-actualLng) * Math.PI/180;
-
-        const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
-                Math.cos(φ1) * Math.cos(φ2) *
-                Math.sin(Δλ/2) * Math.sin(Δλ/2);
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-        const distance = R * c; // in meters
-
-        // Score Formula: 5000 * exp(-10 * distance / 20000) (distance in km)
-        // Max distance 20000km roughly half earth circumference
-        const distanceKm = distance / 1000;
-        const score = Math.floor(5000 * Math.exp(-10 * (distanceKm / 14900))); // Adjusted constant for better curve
-
-        // Update Guess
-        currentGuess.guess_lat = lat;
-        currentGuess.guess_lng = lng;
-        currentGuess.distance_meters = Math.round(distance);
-        currentGuess.score = score;
-        await currentGuess.save();
-
-        // Update Game Total Score
-        game.total_score += score;
-        
-        // Check if game finished
-        if (round >= 5) {
-            game.status = 'finished';
-        }
-        await game.save();
-
-        // Prepare response
-        const response = {
-            score,
-            distance: distanceKm,
-            actual: { lat: actualLat, lng: actualLng },
-            totalScore: game.total_score
-        };
-
-        // If next round exists, fetch it
-        if (round < 5) {
-            const nextRound = await Guess.findOne({
-                where: { game_id: gameId, round_number: round + 1 },
-                include: [{ model: Location, attributes: ['pano_id'] }]
+        const response = await sequelize.transaction(async (transaction) => {
+            const game = await Game.findOne({
+                where: { id: gameId, user_id: req.user.id },
+                transaction,
+                lock: transaction.LOCK.UPDATE
             });
-            if (nextRound) {
-                response.nextRound = {
-                    round: round + 1,
-                    panoId: nextRound.Location.pano_id
-                };
+
+            if (!game) {
+                const err = new Error('Game not found');
+                err.status = 404;
+                throw err;
             }
-        }
+
+            if (game.status === 'finished') {
+                const err = new Error('Game already finished');
+                err.status = 400;
+                throw err;
+            }
+
+            // Find current round guess record and lock it to prevent duplicate scoring.
+            const currentGuess = await Guess.findOne({
+                where: { game_id: gameId, round_number: roundNumber },
+                include: [Location],
+                transaction,
+                lock: transaction.LOCK.UPDATE
+            });
+
+            if (!currentGuess) {
+                const err = new Error('Round not found');
+                err.status = 404;
+                throw err;
+            }
+
+            if (currentGuess.guess_lat !== null || currentGuess.guess_lng !== null) {
+                const err = new Error('Round already played');
+                err.status = 400;
+                throw err;
+            }
+
+            // Calculate score with WGS84 ellipsoid distance.
+            const actualLat = currentGuess.Location.lat;
+            const actualLng = currentGuess.Location.lng;
+            const distance = wgs84DistanceMeters(actualLat, actualLng, latNum, lngNum);
+            const distanceKm = distance / 1000;
+            const score = calculateGeoScore(distance);
+
+            // Update Guess
+            currentGuess.guess_lat = latNum;
+            currentGuess.guess_lng = lngNum;
+            currentGuess.distance_meters = Math.round(distance);
+            currentGuess.score = score;
+            await currentGuess.save({ transaction });
+
+            // Update Game Total Score
+            game.total_score = (game.total_score || 0) + score;
+            
+            // Check if game finished
+            if (roundNumber >= 5) {
+                game.status = 'finished';
+            }
+            await game.save({ transaction });
+
+            // Prepare response
+            const result = {
+                score,
+                distance: distanceKm,
+                actual: { lat: actualLat, lng: actualLng },
+                totalScore: game.total_score
+            };
+
+            // If next round exists, fetch it
+            if (roundNumber < 5) {
+                const nextRound = await Guess.findOne({
+                    where: { game_id: gameId, round_number: roundNumber + 1 },
+                    include: [{ model: Location, attributes: ['pano_id'] }],
+                    transaction
+                });
+                if (nextRound) {
+                    result.nextRound = {
+                        round: roundNumber + 1,
+                        panoId: nextRound.Location.pano_id
+                    };
+                }
+            }
+
+            return result;
+        });
 
         res.json(response);
 
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        res.status(err.status || 500).json({ error: err.message });
     }
 });
 

@@ -15,10 +15,26 @@ import { authState } from '../auth';
 const route = useRoute();
 const router = useRouter();
 
+const readCallbackParams = () => {
+  const hash = window.location.hash?.replace(/^#/, '') || '';
+  const params = new URLSearchParams(hash);
+
+  // Backward-compatible fallback for older redirects.
+  if (!params.get('token') && route.query.token) {
+    params.set('token', route.query.token);
+  }
+
+  return params;
+};
+
 onMounted(async () => {
-  const token = route.query.token;
+  const params = readCallbackParams();
+  const token = params.get('token');
+
+  // Remove token from the visible URL as soon as possible.
+  window.history.replaceState(null, document.title, window.location.pathname);
+
   if (token) {
-    // Temporarily set token so api interceptor works
     authState.setSession(token, null);
     
     try {

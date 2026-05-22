@@ -1,3 +1,3 @@
 # Whereami NG [Under Development]
 
-## A brand-new major update is coming
+## [Play the current version](https://game.llong.tech)

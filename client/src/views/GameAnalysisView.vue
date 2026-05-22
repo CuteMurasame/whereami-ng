@@ -65,8 +65,10 @@ import DashboardLayout from '../components/DashboardLayout.vue';
 import { ref, onMounted, nextTick, computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
-import { api } from '../auth';
+import { api, authState } from '../auth';
 import { Loader } from "@googlemaps/js-api-loader";
+import { createDistanceLabelElement, createFlagMarkerElement, createHtmlOverlay, createPlayerMarkerElement, drawStyledDistanceLine, MAP_MARKER_TONES, straightMidpoint } from '../utils/mapMarkers';
+import { formatLocaleDate } from '../utils/dateFormat';
 
 const { t } = useI18n();
 const route = useRoute();
@@ -81,7 +83,7 @@ const loader = new Loader({
   libraries: ["places", "geometry"]
 });
 
-const formatDate = (d) => new Date(d).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+const formatDate = (d) => formatLocaleDate(d, { month: 'long', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }, 'en-US');
 
 const formatDistance = (meters) => {
   if (meters < 1000) return meters + " m";
@@ -113,12 +115,9 @@ const initMaps = async () => {
     const actual = { lat: guess.Location.lat, lng: guess.Location.lng };
     const userGuess = { lat: guess.guess_lat, lng: guess.guess_lng };
 
-    // Calculate center
-    const center = google.maps.geometry.spherical.interpolate(
-      new google.maps.LatLng(actual), 
-      new google.maps.LatLng(userGuess), 
-      0.5
-    );
+    const actualLatLng = new google.maps.LatLng(actual.lat, actual.lng);
+    const userGuessLatLng = new google.maps.LatLng(userGuess.lat, userGuess.lng);
+    const center = straightMidpoint(google, actualLatLng, userGuessLatLng);
 
     const map = new google.maps.Map(mapDiv, {
       center: center,
@@ -127,49 +126,35 @@ const initMaps = async () => {
       gestureHandling: 'cooperative'
     });
 
-    // Markers
-    new google.maps.Marker({
-      position: actual,
-      map: map,
-      icon: {
-        path: "M14.4 6L14 4H5v17h2v-7h5.6l.4 2h7V6z",
-        fillColor: "#4CAF50",
-        fillOpacity: 1,
-        strokeWeight: 2,
-        strokeColor: "#FFFFFF",
-        scale: 1.2,
-        anchor: new google.maps.Point(5, 20)
-      }
-    });
+    createHtmlOverlay(
+      google,
+      actualLatLng,
+      createFlagMarkerElement(t('duels.target'), MAP_MARKER_TONES.target),
+      map,
+      { zIndex: 3000, transform: 'translate(-28%, -88%)' }
+    );
 
-    new google.maps.Marker({
-      position: userGuess,
-      map: map,
-      icon: {
-        path: "M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z",
-        fillColor: "#FF5252",
-        fillOpacity: 1,
-        strokeWeight: 2,
-        strokeColor: "#FFFFFF",
-        scale: 1.5,
-        anchor: new google.maps.Point(12, 22)
-      }
-    });
+    createHtmlOverlay(
+      google,
+      userGuessLatLng,
+      createPlayerMarkerElement(authState.user, MAP_MARKER_TONES.me, t('singleplayer.guess')),
+      map,
+      { zIndex: 2500 }
+    );
 
-    // Line
-    new google.maps.Polyline({
-      path: [actual, userGuess],
-      geodesic: false,
-      strokeColor: '#FF0000',
-      strokeOpacity: 0.8,
-      strokeWeight: 2,
-      map: map
-    });
+    drawStyledDistanceLine({ google, map, from: actualLatLng, to: userGuessLatLng, color: MAP_MARKER_TONES.me.color, zIndex: 10 });
+    createHtmlOverlay(
+      google,
+      straightMidpoint(google, actualLatLng, userGuessLatLng),
+      createDistanceLabelElement(formatDistance(guess.distance_meters), MAP_MARKER_TONES.me.color),
+      map,
+      { zIndex: 3500, pane: 'floatPane' }
+    );
 
     // Fit bounds
     const bounds = new google.maps.LatLngBounds();
-    bounds.extend(actual);
-    bounds.extend(userGuess);
+    bounds.extend(actualLatLng);
+    bounds.extend(userGuessLatLng);
     map.fitBounds(bounds, { top: 50, bottom: 50, left: 50, right: 50 });
   });
 };
@@ -239,7 +224,7 @@ onMounted(fetchGame);
 
 .rank-badge {
   font-size: 0.8rem;
-  font-weight: 800;
+  font-weight: 700;
   color: white;
   padding: 4px 12px;
   border-radius: 20px;
@@ -252,8 +237,8 @@ onMounted(fetchGame);
 .stat { display: flex; flex-direction: column; gap: 4px; }
 .stat .label { font-size: 0.75rem; text-transform: uppercase; color: var(--color-text-muted); font-weight: 700; letter-spacing: 0.5px; }
 .stat .value { font-size: 1.2rem; font-weight: 600; color: var(--color-text-main); }
-.score-value { color: var(--color-primary); font-weight: 800; font-size: 1.5rem; }
-.mode-badge { text-transform: uppercase; color: var(--color-accent) !important; font-weight: 800; }
+.score-value { color: var(--color-primary); font-weight: 750; font-size: 1.5rem; }
+.mode-badge { text-transform: uppercase; color: var(--color-accent) !important; font-weight: 700; }
 
 .rounds-list { display: flex; flex-direction: column; gap: 2rem; }
 
@@ -278,7 +263,7 @@ onMounted(fetchGame);
 .round-header h3 { margin: 0; font-size: 1rem; font-weight: 700; color: var(--color-text-main); text-transform: uppercase; letter-spacing: 0.5px; }
 
 .round-stats { display: flex; gap: 1.5rem; align-items: center; }
-.round-score { font-weight: 800; color: var(--color-primary); font-size: 1.1rem; }
+.round-score { font-weight: 700; color: var(--color-primary); font-size: 1.1rem; }
 .round-distance { color: var(--color-text-muted); font-weight: 600; font-size: 0.9rem; }
 
 .map-container {

@@ -69,6 +69,7 @@ import { ref } from 'vue';
 import { authState } from '../auth';
 import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
+import { toApiUrl } from '../config';
 
 const { t } = useI18n();
 const router = useRouter();
@@ -76,7 +77,7 @@ const username = ref('');
 const password = ref('');
 const error = ref('');
 const isLoading = ref(false);
-const googleAuthUrl = `http://${window.location.hostname}:3000/api/auth/google`;
+const googleAuthUrl = toApiUrl('/auth/google');
 
 const handleLogin = async () => {
   error.value = '';

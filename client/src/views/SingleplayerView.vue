@@ -89,7 +89,8 @@
             :disabled="!currentGuess"
             @click.stop="submitGuess"
           >
-            {{ t('singleplayer.guess') }}
+            <span>{{ t('singleplayer.guess') }}</span>
+            <kbd v-if="currentGuess && spaceSubmitGuessEnabled" class="hotkey-pill">Space</kbd>
           </button>
         </div>
 
@@ -109,6 +110,15 @@
           </button>
           <button class="control-btn" @click="redoMove" :disabled="currentHistoryIndex >= moveHistory.length - 1" title="Redo">
             <i class="fa-solid fa-rotate-right"></i>
+          </button>
+        </div>
+
+        <div v-if="roundLoadWarningVisible" class="load-warning-toast">
+          <i class="fa-solid fa-triangle-exclamation"></i>
+          <span>{{ t('common.slowLoadHint') }}</span>
+          <button type="button" @click="retryRoundLoad">{{ t('common.refresh') }}</button>
+          <button type="button" class="warning-close-btn" :aria-label="t('common.dismiss')" @click="dismissRoundLoadWarning">
+            <i class="fa-solid fa-xmark"></i>
           </button>
         </div>
       </div>
@@ -172,9 +182,11 @@ import { ref, onMounted, onUnmounted, computed } from 'vue';
 import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { Loader } from '@googlemaps/js-api-loader';
-import { api } from '../auth';
+import { api, authState } from '../auth';
 import DashboardLayout from '../components/DashboardLayout.vue';
 import Swal from 'sweetalert2';
+import { isSpaceSubmitGuessEnabled, PREFERENCES_CHANGED_EVENT, shouldIgnoreHotkeyTarget } from '../utils/preferences';
+import { createDistanceLabelElement, createFlagMarkerElement, createHtmlOverlay, createPlayerMarkerElement, drawStyledDistanceLine, MAP_MARKER_TONES, straightMidpoint } from '../utils/mapMarkers';
 
 const { t } = useI18n();
 const router = useRouter();
@@ -192,6 +204,8 @@ const lastDistance = ref(0);
 const mapExpanded = ref(false);
 const currentGuess = ref(null);
 const loading = ref(false);
+const roundLoadWarningVisible = ref(false);
+const spaceSubmitGuessEnabled = ref(isSpaceSubmitGuessEnabled());
 
 // History State
 const moveHistory = ref([]);
@@ -206,6 +220,13 @@ let resultMap = null;
 let guessMarker = null;
 let resultMarkers = [];
 let resultLine = null;
+let roundLoadWarningTimer = null;
+let roundLoadWarningKey = null;
+let dismissedRoundLoadWarningKey = null;
+let roundStatePersistTimer = null;
+let streetStatusListener = null;
+let streetPanoListener = null;
+let streetPovListener = null;
 
 // API Loader
 const loader = new Loader({
@@ -214,25 +235,139 @@ const loader = new Loader({
   libraries: ["geometry"]
 });
 
+const SINGLEPLAYER_ROUND_STATE_PREFIX = 'whereami.singleplayer.roundState:';
+const NON_MOVING_BLOCKED_KEYS = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', '+', '=', '_', '-']);
+const LOAD_WARNING_DELAY_MS = 4000;
+
 onMounted(async () => {
   window.addEventListener('keydown', handleKeydown, true);
+  window.addEventListener(PREFERENCES_CHANGED_EVENT, syncPreferences);
   await checkActiveGame();
   await fetchMaps();
 });
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeydown, true);
+  window.removeEventListener(PREFERENCES_CHANGED_EVENT, syncPreferences);
+  clearRoundLoadWarning();
+  if (roundStatePersistTimer) window.clearTimeout(roundStatePersistTimer);
+  if (streetStatusListener) streetStatusListener.remove();
+  if (streetPanoListener) streetPanoListener.remove();
+  if (streetPovListener) streetPovListener.remove();
 });
 
+const activeRoundKey = () => gameId.value ? `${gameId.value}:${round.value}` : null;
+const roundStateStorageKey = (roundKey = activeRoundKey()) => roundKey ? `${SINGLEPLAYER_ROUND_STATE_PREFIX}${roundKey}` : null;
+const readRoundState = (roundKey = activeRoundKey()) => {
+  const key = roundStateStorageKey(roundKey);
+  if (!key) return null;
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+};
+const serializeLatLng = (point) => {
+  if (!point) return null;
+  const lat = typeof point.lat === 'function' ? point.lat() : point.lat;
+  const lng = typeof point.lng === 'function' ? point.lng() : point.lng;
+  if (!Number.isFinite(Number(lat)) || !Number.isFinite(Number(lng))) return null;
+  return { lat: Number(lat), lng: Number(lng) };
+};
+const isValidPov = (pov) => pov && Number.isFinite(Number(pov.heading)) && Number.isFinite(Number(pov.pitch));
+const persistRoundState = () => {
+  if (gameState.value !== 'playing') return;
+  const key = roundStateStorageKey();
+  if (!key) return;
+  try {
+    localStorage.setItem(key, JSON.stringify({
+      roundKey: activeRoundKey(),
+      pano: streetView?.getPano?.() || null,
+      pov: streetView?.getPov?.() || null,
+      guess: serializeLatLng(currentGuess.value),
+      moveHistory: Array.isArray(moveHistory.value) ? moveHistory.value.slice(-100) : [],
+      currentHistoryIndex: currentHistoryIndex.value,
+      startPanoId: startPanoId.value || null,
+      savedAt: Date.now()
+    }));
+  } catch {
+    // Ignore storage failures; the game can still continue.
+  }
+};
+const schedulePersistRoundState = () => {
+  if (roundStatePersistTimer) window.clearTimeout(roundStatePersistTimer);
+  roundStatePersistTimer = window.setTimeout(() => {
+    roundStatePersistTimer = null;
+    persistRoundState();
+  }, 140);
+};
+
+
+const armRoundLoadWarning = (roundKey) => {
+  if (!roundKey) return;
+  if (dismissedRoundLoadWarningKey !== roundKey) dismissedRoundLoadWarningKey = null;
+  if (roundLoadWarningTimer) window.clearTimeout(roundLoadWarningTimer);
+  roundLoadWarningKey = roundKey;
+  roundLoadWarningVisible.value = false;
+  roundLoadWarningTimer = window.setTimeout(() => {
+    if (roundLoadWarningKey === roundKey && dismissedRoundLoadWarningKey !== roundKey && gameState.value === 'playing') {
+      roundLoadWarningVisible.value = true;
+    }
+  }, LOAD_WARNING_DELAY_MS);
+};
+
+const clearRoundLoadWarning = (roundKey = null) => {
+  if (roundKey && roundLoadWarningKey && roundLoadWarningKey !== roundKey) return;
+  if (roundLoadWarningTimer) window.clearTimeout(roundLoadWarningTimer);
+  roundLoadWarningTimer = null;
+  roundLoadWarningKey = null;
+  roundLoadWarningVisible.value = false;
+};
+
+const dismissRoundLoadWarning = () => {
+  dismissedRoundLoadWarningKey = roundLoadWarningKey || activeRoundKey();
+  roundLoadWarningVisible.value = false;
+};
+
+const retryRoundLoad = async () => {
+  dismissedRoundLoadWarningKey = null;
+  roundLoadWarningVisible.value = false;
+  const loadKey = activeRoundKey();
+  armRoundLoadWarning(loadKey);
+  const pano = streetView?.getPano?.() || startPanoId.value;
+  if (pano) {
+    try {
+      await initMaps(pano, loadKey);
+    } catch (err) {
+      console.error('Failed to retry round load', err);
+    }
+  }
+};
+
+const syncPreferences = () => {
+  spaceSubmitGuessEnabled.value = isSpaceSubmitGuessEnabled();
+};
+
 const handleKeydown = (e) => {
+  if (shouldIgnoreHotkeyTarget(e.target)) return;
+
+  const plainKey = !e.metaKey && !e.altKey && !e.ctrlKey;
+  if (plainKey && gameState.value === 'playing' && selectedMode.value !== 'moving' && NON_MOVING_BLOCKED_KEYS.has(e.key)) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
+    return;
+  }
+
   // Playing state: Space to submit guess
-  if ((e.code === 'Space' || e.key === ' ') && gameState.value === 'playing' && currentGuess.value && !loading.value) {
+  if ((e.code === 'Space' || e.key === ' ') && plainKey && gameState.value === 'playing' && currentGuess.value && !loading.value && spaceSubmitGuessEnabled.value) {
     e.preventDefault();
     e.stopPropagation();
     submitGuess();
   }
   // Result state: Space to next round
-  else if ((e.code === 'Space' || e.key === ' ') && gameState.value === 'result') {
+  else if ((e.code === 'Space' || e.key === ' ') && plainKey && gameState.value === 'result') {
     e.preventDefault();
     e.stopPropagation();
     nextRound();
@@ -301,6 +436,7 @@ const startGame = async () => {
 
 const startRound = async (panoId) => {
   currentGuess.value = null;
+  if (guessMarker) guessMarker.setMap(null);
   guessMarker = null; // Reset marker reference for new map instance
   mapExpanded.value = false;
   
@@ -309,19 +445,30 @@ const startRound = async (panoId) => {
   currentHistoryIndex.value = -1;
   startPanoId.value = panoId;
 
+  const loadKey = activeRoundKey();
+  armRoundLoadWarning(loadKey);
+
   // Wait for DOM to update
   setTimeout(async () => {
-    await initMaps(panoId);
+    try {
+      await initMaps(panoId, loadKey);
+    } catch (err) {
+      console.error('Failed to initialize round maps:', err);
+    }
   }, 100);
 };
 
-const initMaps = async (panoId) => {
+const initMaps = async (panoId, loadKey = activeRoundKey()) => {
   const google = await loader.load();
-  
+  const savedState = readRoundState(loadKey);
+  const savedPano = typeof savedState?.pano === 'string' && savedState.pano ? savedState.pano : null;
+  const savedPov = isValidPov(savedState?.pov) ? { heading: Number(savedState.pov.heading), pitch: Number(savedState.pov.pitch) } : null;
+  const initialPano = savedPano || panoId;
+
   // Init Street View
   const svOptions = {
-    pano: panoId,
-    pov: { heading: 0, pitch: 0 },
+    pano: initialPano,
+    pov: savedPov || { heading: 0, pitch: 0 },
     zoom: 1,
     addressControl: false,
     showRoadLabels: false,
@@ -329,27 +476,42 @@ const initMaps = async (panoId) => {
     disableDefaultUI: true,
     clickToGo: selectedMode.value === 'moving',
     linksControl: selectedMode.value === 'moving',
+    keyboardShortcuts: selectedMode.value === 'moving',
     scrollwheel: selectedMode.value !== 'nmpz',
     disableDoubleClickZoom: selectedMode.value === 'nmpz'
   };
 
-  streetView = new google.maps.StreetViewPanorama(
-    document.getElementById("street-view"),
-    svOptions
-  );
+  const streetViewElement = document.getElementById("street-view");
+  if (!streetViewElement) return;
 
-  // Initialize history
-  moveHistory.value = [panoId];
-  currentHistoryIndex.value = 0;
+  if (streetStatusListener) streetStatusListener.remove();
+  if (streetPanoListener) streetPanoListener.remove();
+  if (streetPovListener) streetPovListener.remove();
 
-  streetView.addListener('pano_changed', () => {
+  streetView = new google.maps.StreetViewPanorama(streetViewElement, svOptions);
+
+  // Initialize or restore movement history.
+  if (Array.isArray(savedState?.moveHistory) && savedState.moveHistory.length) {
+    moveHistory.value = savedState.moveHistory.filter(Boolean).slice(-100);
+    const maxIndex = moveHistory.value.length - 1;
+    const savedIndex = Number.isInteger(savedState.currentHistoryIndex) ? savedState.currentHistoryIndex : moveHistory.value.indexOf(initialPano);
+    currentHistoryIndex.value = Math.min(Math.max(savedIndex >= 0 ? savedIndex : maxIndex, 0), maxIndex);
+    startPanoId.value = savedState.startPanoId || panoId;
+  } else {
+    moveHistory.value = [initialPano];
+    currentHistoryIndex.value = 0;
+    startPanoId.value = panoId;
+  }
+
+  streetPanoListener = streetView.addListener('pano_changed', () => {
     const newPano = streetView.getPano();
-    
+
     // Avoid adding duplicates if the event fires for the current pano
     if (moveHistory.value[currentHistoryIndex.value] === newPano) return;
 
     if (isNavigatingHistory) {
       isNavigatingHistory = false;
+      schedulePersistRoundState();
       return;
     }
 
@@ -360,17 +522,26 @@ const initMaps = async (panoId) => {
 
     moveHistory.value.push(newPano);
     currentHistoryIndex.value++;
+    schedulePersistRoundState();
+  });
+
+  streetStatusListener = streetView.addListener('status_changed', () => {
+    const status = streetView.getStatus?.();
+    if (status === google.maps.StreetViewStatus.OK || status === 'OK') {
+      clearRoundLoadWarning(loadKey);
+      schedulePersistRoundState();
+    } else if (roundLoadWarningKey === loadKey && dismissedRoundLoadWarningKey !== loadKey) {
+      roundLoadWarningVisible.value = true;
+    }
   });
 
   // Compass Init
   setupDynamicCompass();
-  updateCompass(0);
-  streetView.addListener('pov_changed', () => {
+  updateCompass(streetView.getPov().heading);
+  streetPovListener = streetView.addListener('pov_changed', () => {
     updateCompass(streetView.getPov().heading);
+    schedulePersistRoundState();
   });
-
-  // For NMPZ, we might need extra listeners to prevent movement if API options aren't enough
-  // But standard options usually suffice.
 
   // Init Guess Map
   guessMap = new google.maps.Map(document.getElementById("guess-map"), {
@@ -389,31 +560,26 @@ const initMaps = async (panoId) => {
   guessMap.addListener("click", (e) => {
     placeGuessMarker(e.latLng);
   });
+
+  const restoredGuess = serializeLatLng(savedState?.guess);
+  if (restoredGuess) {
+    placeGuessMarker(new google.maps.LatLng(restoredGuess.lat, restoredGuess.lng), { persist: false });
+  }
+
+  const currentStatus = streetView.getStatus?.();
+  if (currentStatus === google.maps.StreetViewStatus.OK || currentStatus === 'OK') clearRoundLoadWarning(loadKey);
+  schedulePersistRoundState();
 };
 
-const placeGuessMarker = (latLng) => {
+const placeGuessMarker = (latLng, options = {}) => {
   currentGuess.value = latLng;
-  
-  const icon = {
-    path: "M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z",
-    fillColor: "#FF5252",
-    fillOpacity: 1,
-    strokeWeight: 2,
-    strokeColor: "#FFFFFF",
-    scale: 2,
-    anchor: new google.maps.Point(12, 22)
-  };
+  if (!guessMap) return;
 
-  if (guessMarker) {
-    guessMarker.setPosition(latLng);
-    guessMarker.setIcon(icon);
-  } else {
-    guessMarker = new google.maps.Marker({
-      position: latLng,
-      map: guessMap,
-      icon: icon
-    });
-  }
+  if (guessMarker) guessMarker.setMap(null);
+  const element = createPlayerMarkerElement(authState.user, MAP_MARKER_TONES.me, t('singleplayer.guess'), true);
+  guessMarker = createHtmlOverlay(google, latLng, element, guessMap, { zIndex: 1000 });
+
+  if (options.persist !== false) schedulePersistRoundState();
 };
 
 const submitGuess = async () => {
@@ -436,6 +602,7 @@ const submitGuess = async () => {
     lastScore.value = result.score;
     totalScore.value = result.totalScore;
 
+    clearRoundLoadWarning();
     gameState.value = 'result';
     
     // Show Result Map
@@ -477,6 +644,7 @@ const resetGame = () => {
   totalScore.value = 0;
   gameId.value = null;
   currentGuess.value = null;
+  if (guessMarker) guessMarker.setMap(null);
   guessMarker = null;
   lastDistance.value = null;
   lastScore.value = null;
@@ -496,12 +664,9 @@ const gameRank = computed(() => {
 const initResultMap = async (actual, guess) => {
   const google = await loader.load();
   
-  // Calculate center using interpolation
-  const center = google.maps.geometry.spherical.interpolate(
-    new google.maps.LatLng(actual), 
-    new google.maps.LatLng(guess), 
-    0.5
-  );
+  const actualLatLng = new google.maps.LatLng(actual.lat, actual.lng);
+  const guessLatLng = guess instanceof google.maps.LatLng ? guess : new google.maps.LatLng(guess.lat, guess.lng);
+  const center = straightMidpoint(google, actualLatLng, guessLatLng);
 
   resultMap = new google.maps.Map(document.getElementById("result-map"), {
     center: center,
@@ -515,56 +680,35 @@ const initResultMap = async (actual, guess) => {
     }
   });
 
-  // Answer Marker (Flag)
-  const answerIcon = {
-    path: "M14.4 6L14 4H5v17h2v-7h5.6l.4 2h7V6z",
-    fillColor: "#4CAF50",
-    fillOpacity: 1,
-    strokeWeight: 2,
-    strokeColor: "#FFFFFF",
-    scale: 1.5,
-    anchor: new google.maps.Point(5, 20)
-  };
+  createHtmlOverlay(
+    google,
+    actualLatLng,
+    createFlagMarkerElement(t('duels.target'), MAP_MARKER_TONES.target),
+    resultMap,
+    { zIndex: 3000, transform: 'translate(-28%, -88%)' }
+  );
 
-  new google.maps.Marker({
-    position: actual,
-    map: resultMap,
-    icon: answerIcon,
-    zIndex: 2
-  });
+  createHtmlOverlay(
+    google,
+    guessLatLng,
+    createPlayerMarkerElement(authState.user, MAP_MARKER_TONES.me, t('singleplayer.guess')),
+    resultMap,
+    { zIndex: 2500 }
+  );
 
-  // Guess Marker (Red Pin)
-  const guessIcon = {
-    path: "M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z",
-    fillColor: "#FF5252",
-    fillOpacity: 1,
-    strokeWeight: 2,
-    strokeColor: "#FFFFFF",
-    scale: 2,
-    anchor: new google.maps.Point(12, 22)
-  };
-
-  new google.maps.Marker({
-    position: guess,
-    map: resultMap,
-    icon: guessIcon,
-    zIndex: 1
-  });
-
-  // Line
-  new google.maps.Polyline({
-    path: [actual, guess],
-    geodesic: false,
-    strokeColor: '#FF0000',
-    strokeOpacity: 0.8,
-    strokeWeight: 2,
-    map: resultMap
-  });
+  drawStyledDistanceLine({ google, map: resultMap, from: actualLatLng, to: guessLatLng, color: MAP_MARKER_TONES.me.color, zIndex: 10 });
+  createHtmlOverlay(
+    google,
+    straightMidpoint(google, actualLatLng, guessLatLng),
+    createDistanceLabelElement(lastDistance.value, MAP_MARKER_TONES.me.color),
+    resultMap,
+    { zIndex: 3500, pane: 'floatPane' }
+  );
 
   // Fit bounds
   const bounds = new google.maps.LatLngBounds();
-  bounds.extend(actual);
-  bounds.extend(guess);
+  bounds.extend(actualLatLng);
+  bounds.extend(guessLatLng);
   resultMap.fitBounds(bounds, { top: 100, bottom: 100, left: 50, right: 50 });
 
   // Ensure center is correct and zoom isn't too extreme for close guesses
@@ -584,6 +728,7 @@ const undoMove = () => {
     isNavigatingHistory = true;
     currentHistoryIndex.value--;
     streetView.setPano(moveHistory.value[currentHistoryIndex.value]);
+    schedulePersistRoundState();
   }
 };
 
@@ -592,12 +737,14 @@ const redoMove = () => {
     isNavigatingHistory = true;
     currentHistoryIndex.value++;
     streetView.setPano(moveHistory.value[currentHistoryIndex.value]);
+    schedulePersistRoundState();
   }
 };
 
 const returnToStart = () => {
   if (startPanoId.value) {
     streetView.setPano(startPanoId.value);
+    schedulePersistRoundState();
   }
 };
 
@@ -702,7 +849,8 @@ const updateCompass = (heading) => {
 }
 
 .guess-map { flex: 1; border-radius: 4px; background: #eee; }
-.guess-btn { width: 100%; height: 40px; flex-shrink: 0; }
+.guess-btn { width: 100%; height: 40px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; gap: .5rem; }
+.hotkey-pill { border: 1px solid rgba(255,255,255,.45); background: rgba(255,255,255,.18); color: inherit; border-radius: 6px; padding: 1px 6px; font-size: .72rem; font-weight: 900; line-height: 1.2; }
 
 .round-info {
   position: absolute; top: 20px; left: 20px;
@@ -710,6 +858,29 @@ const updateCompass = (heading) => {
   border-radius: 20px; display: flex; gap: 20px; font-weight: bold;
   z-index: 10;
 }
+
+.load-warning-toast {
+  position: absolute;
+  left: 50%;
+  bottom: 86px;
+  transform: translateX(-50%);
+  z-index: 12;
+  max-width: min(520px, calc(100% - 32px));
+  display: inline-flex;
+  align-items: center;
+  gap: .55rem;
+  background: rgba(15,23,42,.82);
+  color: #fff;
+  border: 1px solid rgba(255,255,255,.18);
+  border-radius: 999px;
+  padding: .55rem .75rem;
+  box-shadow: 0 16px 42px rgba(0,0,0,.25);
+  font-weight: 800;
+  font-size: .86rem;
+}
+.load-warning-toast span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.load-warning-toast button { border: 1px solid rgba(255,255,255,.28); background: rgba(255,255,255,.12); color: #fff; border-radius: 999px; padding: .32rem .6rem; font-weight: 900; cursor: pointer; flex: 0 0 auto; }
+.load-warning-toast .warning-close-btn { width: 28px; height: 28px; padding: 0; display: grid; place-items: center; border-radius: 999px; }
 
 /* Result Screen */
 .result-screen { flex: 1; display: flex; flex-direction: column; position: relative; }

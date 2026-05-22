@@ -1,6 +1,7 @@
 const { Sequelize, DataTypes } = require('sequelize');
-// Load environment variables from .env file
-require('dotenv').config(); 
+const path = require('path');
+// Load environment variables from server/.env regardless of current working directory.
+require('dotenv').config({ path: path.join(__dirname, '..', '.env') }); 
 
 // 1. Setup Database Connection
 const sequelize = new Sequelize(
@@ -29,6 +30,12 @@ const User = sequelize.define('User', {
     google_id: { type: DataTypes.STRING, unique: true, allowNull: true },
     google_email: { type: DataTypes.STRING, unique: true, allowNull: true },
     elo_rating: { type: DataTypes.INTEGER, defaultValue: 1500 },
+    peak_elo: { type: DataTypes.INTEGER, defaultValue: 1500 },
+    elo_games: { type: DataTypes.INTEGER, defaultValue: 0 },
+    total_duels: { type: DataTypes.INTEGER, defaultValue: 0 },
+    total_wins: { type: DataTypes.INTEGER, defaultValue: 0 },
+    total_losses: { type: DataTypes.INTEGER, defaultValue: 0 },
+    total_draws: { type: DataTypes.INTEGER, defaultValue: 0 },
     is_bot: { type: DataTypes.BOOLEAN, defaultValue: false }, // For AI opponents later
     bot_accuracy: { type: DataTypes.FLOAT, allowNull: true }  // 0.0 to 1.0
 }, {
@@ -105,7 +112,9 @@ const Settings = sequelize.define('Settings', {
     maintenance_mode: { type: DataTypes.BOOLEAN, defaultValue: false } // Bonus feature
 }, {
     tableName: 'system_settings',
-    timestamps: true
+    timestamps: true,
+    createdAt: 'created_at',
+    updatedAt: 'updated_at'
 });
 
 // --- RATING HISTORY ---
@@ -113,6 +122,8 @@ const RatingHistory = sequelize.define('RatingHistory', {
     old_rating: { type: DataTypes.INTEGER, allowNull: false },
     new_rating: { type: DataTypes.INTEGER, allowNull: false },
     rank_position: { type: DataTypes.INTEGER },
+    rating_change: { type: DataTypes.INTEGER, defaultValue: 0 },
+    duel_id: { type: DataTypes.INTEGER, allowNull: true },
 }, {
     tableName: 'rating_history',
     timestamps: true,
@@ -120,47 +131,131 @@ const RatingHistory = sequelize.define('RatingHistory', {
     updatedAt: false // We don't need updated_at for history logs
 });
 
+// --- DUEL MATCHMAKING QUEUE ---
+const DuelQueue = sequelize.define('DuelQueue', {
+    user_id: { type: DataTypes.INTEGER, primaryKey: true },
+    mode: { type: DataTypes.ENUM('moving', 'nm', 'nmpz'), defaultValue: 'moving' },
+    map_id: { type: DataTypes.INTEGER, allowNull: true }
+}, {
+    tableName: 'duel_queue',
+    timestamps: true,
+    createdAt: 'created_at',
+    updatedAt: false
+});
+
+// --- DUEL ---
+const Duel = sequelize.define('Duel', {
+    player1_id: { type: DataTypes.INTEGER, allowNull: false },
+    player2_id: { type: DataTypes.INTEGER, allowNull: false },
+    map_id: { type: DataTypes.INTEGER, allowNull: true },
+    mode: { type: DataTypes.ENUM('moving', 'nm', 'nmpz'), defaultValue: 'moving' },
+    status: { type: DataTypes.ENUM('playing', 'round_results', 'finished', 'cancelled'), defaultValue: 'playing' },
+    current_round: { type: DataTypes.INTEGER, defaultValue: 1 },
+    total_rounds: { type: DataTypes.INTEGER, defaultValue: 5 },
+    player1_score: { type: DataTypes.INTEGER, defaultValue: 0 },
+    player2_score: { type: DataTypes.INTEGER, defaultValue: 0 },
+    winner_id: { type: DataTypes.INTEGER, allowNull: true },
+    result: { type: DataTypes.ENUM('player1', 'player2', 'draw', 'cancelled'), allowNull: true },
+    player1_rating_before: { type: DataTypes.INTEGER, allowNull: true },
+    player2_rating_before: { type: DataTypes.INTEGER, allowNull: true },
+    player1_rating_after: { type: DataTypes.INTEGER, allowNull: true },
+    player2_rating_after: { type: DataTypes.INTEGER, allowNull: true },
+    player1_rating_change: { type: DataTypes.INTEGER, defaultValue: 0 },
+    player2_rating_change: { type: DataTypes.INTEGER, defaultValue: 0 },
+    finished_at: { type: DataTypes.DATE, allowNull: true }
+}, {
+    tableName: 'duels',
+    timestamps: true,
+    createdAt: 'created_at',
+    updatedAt: 'updated_at'
+});
+
+// --- DUEL ROUND ---
+const DuelRound = sequelize.define('DuelRound', {
+    duel_id: { type: DataTypes.INTEGER, allowNull: false },
+    location_id: { type: DataTypes.INTEGER, allowNull: true },
+    round_number: { type: DataTypes.INTEGER, allowNull: false },
+    player1_guess_lat: { type: DataTypes.DOUBLE, allowNull: true },
+    player1_guess_lng: { type: DataTypes.DOUBLE, allowNull: true },
+    player1_score: { type: DataTypes.INTEGER, defaultValue: 0 },
+    player1_distance_meters: { type: DataTypes.INTEGER, allowNull: true },
+    player1_guessed_at: { type: DataTypes.DATE, allowNull: true },
+    player2_guess_lat: { type: DataTypes.DOUBLE, allowNull: true },
+    player2_guess_lng: { type: DataTypes.DOUBLE, allowNull: true },
+    player2_score: { type: DataTypes.INTEGER, defaultValue: 0 },
+    player2_distance_meters: { type: DataTypes.INTEGER, allowNull: true },
+    player2_guessed_at: { type: DataTypes.DATE, allowNull: true }
+}, {
+    tableName: 'duel_rounds',
+    timestamps: true,
+    createdAt: 'created_at',
+    updatedAt: 'updated_at',
+    indexes: [{ unique: true, fields: ['duel_id', 'round_number'] }]
+});
+
 // 3. Define Relationships
 
+// Foreign key definitions are explicit so Sequelize does not guess ON DELETE SET NULL
+// during schema repair. This keeps the model layer aligned with create_db.sql and
+// prevents MySQL errno 150 on older local development databases whose FK columns
+// were created as NOT NULL or already had CASCADE constraints.
+const nullableFk = (name) => ({ name, allowNull: true });
+const requiredFk = (name) => ({ name, allowNull: false });
+
 // User <-> Map (Creator)
-User.hasMany(Map, { foreignKey: 'creator_id' });
-Map.belongsTo(User, { foreignKey: 'creator_id' });
+User.hasMany(Map, { foreignKey: nullableFk('creator_id'), onDelete: 'SET NULL', onUpdate: 'CASCADE' });
+Map.belongsTo(User, { foreignKey: nullableFk('creator_id'), onDelete: 'SET NULL', onUpdate: 'CASCADE' });
 
 // Map <-> Location
-Map.hasMany(Location, { foreignKey: 'map_id' });
-Location.belongsTo(Map, { foreignKey: 'map_id' });
+Map.hasMany(Location, { foreignKey: nullableFk('map_id'), onDelete: 'CASCADE', onUpdate: 'CASCADE' });
+Location.belongsTo(Map, { foreignKey: nullableFk('map_id'), onDelete: 'CASCADE', onUpdate: 'CASCADE' });
 
 // User <-> Game (Player)
-User.hasMany(Game, { foreignKey: 'user_id' });
-Game.belongsTo(User, { foreignKey: 'user_id' });
+User.hasMany(Game, { foreignKey: nullableFk('user_id'), onDelete: 'CASCADE', onUpdate: 'CASCADE' });
+Game.belongsTo(User, { foreignKey: nullableFk('user_id'), onDelete: 'CASCADE', onUpdate: 'CASCADE' });
 
 // Game <-> Map (Which map is being played)
-Map.hasMany(Game, { foreignKey: 'map_id' });
-Game.belongsTo(Map, { foreignKey: 'map_id' });
+Map.hasMany(Game, { foreignKey: nullableFk('map_id'), onDelete: 'CASCADE', onUpdate: 'CASCADE' });
+Game.belongsTo(Map, { foreignKey: nullableFk('map_id'), onDelete: 'CASCADE', onUpdate: 'CASCADE' });
 
 // Game <-> Guess
-Game.hasMany(Guess, { foreignKey: 'game_id' });
-Guess.belongsTo(Game, { foreignKey: 'game_id' });
+Game.hasMany(Guess, { foreignKey: nullableFk('game_id'), onDelete: 'CASCADE', onUpdate: 'CASCADE' });
+Guess.belongsTo(Game, { foreignKey: nullableFk('game_id'), onDelete: 'CASCADE', onUpdate: 'CASCADE' });
 
 // Location <-> Guess (Which location was this guess for?)
-Location.hasMany(Guess, { foreignKey: 'location_id' });
-Guess.belongsTo(Location, { foreignKey: 'location_id' });
+Location.hasMany(Guess, { foreignKey: nullableFk('location_id'), onDelete: 'SET NULL', onUpdate: 'CASCADE' });
+Guess.belongsTo(Location, { foreignKey: nullableFk('location_id'), onDelete: 'SET NULL', onUpdate: 'CASCADE' });
 
 // User <-> RatingHistory
-User.hasMany(RatingHistory, { foreignKey: 'user_id' });
-RatingHistory.belongsTo(User, { foreignKey: 'user_id' });
+User.hasMany(RatingHistory, { foreignKey: nullableFk('user_id'), onDelete: 'CASCADE', onUpdate: 'CASCADE' });
+RatingHistory.belongsTo(User, { foreignKey: nullableFk('user_id'), onDelete: 'CASCADE', onUpdate: 'CASCADE' });
 
 // Game <-> RatingHistory
-Game.hasMany(RatingHistory, { foreignKey: 'game_id' });
-RatingHistory.belongsTo(Game, { foreignKey: 'game_id' });
+Game.hasMany(RatingHistory, { foreignKey: nullableFk('game_id'), onDelete: 'CASCADE', onUpdate: 'CASCADE' });
+RatingHistory.belongsTo(Game, { foreignKey: nullableFk('game_id'), onDelete: 'CASCADE', onUpdate: 'CASCADE' });
 
-sequelize.authenticate()
-    .then(() => {
-        console.log('✅ Connection successful. Using existing database tables.');
-    })
-    .catch(err => {
-        console.error('❌ Database connection error:', err);
-    });
+// Duel Queue
+User.hasOne(DuelQueue, { foreignKey: requiredFk('user_id'), onDelete: 'CASCADE', onUpdate: 'CASCADE' });
+DuelQueue.belongsTo(User, { foreignKey: requiredFk('user_id'), onDelete: 'CASCADE', onUpdate: 'CASCADE' });
+Map.hasMany(DuelQueue, { foreignKey: nullableFk('map_id'), onDelete: 'SET NULL', onUpdate: 'CASCADE' });
+DuelQueue.belongsTo(Map, { foreignKey: nullableFk('map_id'), onDelete: 'SET NULL', onUpdate: 'CASCADE' });
+
+// Duel relationships
+User.hasMany(Duel, { foreignKey: requiredFk('player1_id'), as: 'DuelsAsPlayer1', onDelete: 'CASCADE', onUpdate: 'CASCADE' });
+User.hasMany(Duel, { foreignKey: requiredFk('player2_id'), as: 'DuelsAsPlayer2', onDelete: 'CASCADE', onUpdate: 'CASCADE' });
+Duel.belongsTo(User, { foreignKey: requiredFk('player1_id'), as: 'Player1', onDelete: 'CASCADE', onUpdate: 'CASCADE' });
+Duel.belongsTo(User, { foreignKey: requiredFk('player2_id'), as: 'Player2', onDelete: 'CASCADE', onUpdate: 'CASCADE' });
+Duel.belongsTo(User, { foreignKey: nullableFk('winner_id'), as: 'Winner', onDelete: 'SET NULL', onUpdate: 'CASCADE' });
+Map.hasMany(Duel, { foreignKey: nullableFk('map_id'), onDelete: 'SET NULL', onUpdate: 'CASCADE' });
+Duel.belongsTo(Map, { foreignKey: nullableFk('map_id'), onDelete: 'SET NULL', onUpdate: 'CASCADE' });
+
+Duel.hasMany(DuelRound, { foreignKey: requiredFk('duel_id'), onDelete: 'CASCADE', onUpdate: 'CASCADE' });
+DuelRound.belongsTo(Duel, { foreignKey: requiredFk('duel_id'), onDelete: 'CASCADE', onUpdate: 'CASCADE' });
+Location.hasMany(DuelRound, { foreignKey: nullableFk('location_id'), onDelete: 'SET NULL', onUpdate: 'CASCADE' });
+DuelRound.belongsTo(Location, { foreignKey: nullableFk('location_id'), onDelete: 'SET NULL', onUpdate: 'CASCADE' });
+
+Duel.hasMany(RatingHistory, { foreignKey: nullableFk('duel_id'), onDelete: 'CASCADE', onUpdate: 'CASCADE' });
+RatingHistory.belongsTo(Duel, { foreignKey: nullableFk('duel_id'), onDelete: 'CASCADE', onUpdate: 'CASCADE' });
 
 module.exports = { 
     sequelize, 
@@ -170,5 +265,8 @@ module.exports = {
     Game, 
     Guess,
 	Settings,
-    RatingHistory
+    RatingHistory,
+    DuelQueue,
+    Duel,
+    DuelRound
 };

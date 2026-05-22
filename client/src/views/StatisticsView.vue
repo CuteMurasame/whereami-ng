@@ -5,6 +5,7 @@
         <h2>{{ t('statistics.title') }}</h2>
         <p>{{ t('statistics.subtitle') }}</p>
       </div>
+      <BackButton fallback="/lobby" />
     </header>
 
     <div class="scroll-content">
@@ -72,14 +73,36 @@
           </div>
         </section>
 
-        <!-- Other Modes (Placeholders) -->
-        <section class="stats-section locked">
+        <!-- Duel Stats -->
+        <section class="stats-section">
             <div class="section-header">
                 <div class="icon-box duels-icon">
                 <i class="fa-solid fa-fire"></i>
                 </div>
                 <h3>{{ t('lobby.duels') }}</h3>
-                <span class="badge">{{ t('lobby.soon') }}</span>
+            </div>
+
+            <div class="chart-wrapper">
+              <RatingChart :userId="user.id" v-if="user" />
+            </div>
+
+            <div class="stats-grid">
+              <div class="stat-card">
+                <div class="stat-label">{{ t('duels.rating') }}</div>
+                <div class="stat-value highlight">{{ stats.duels.rating }}</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-label">{{ t('duels.peak') }}</div>
+                <div class="stat-value">{{ stats.duels.peakRating }}</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-label">{{ t('statistics.games_played') }}</div>
+                <div class="stat-value">{{ stats.duels.totalDuels }}</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-label">{{ t('profile.winRate') }}</div>
+                <div class="stat-value">{{ stats.duels.winRate }}%</div>
+              </div>
             </div>
         </section>
 
@@ -100,7 +123,9 @@
 
 <script setup>
 import DashboardLayout from '../components/DashboardLayout.vue';
+import BackButton from '../components/BackButton.vue';
 import ScoreChart from '../components/ScoreChart.vue';
+import RatingChart from '../components/RatingChart.vue';
 import { ref, onMounted, computed } from 'vue';
 import { api, authState } from '../auth';
 import { useI18n } from 'vue-i18n';
@@ -114,6 +139,16 @@ const stats = ref({
     avgScore: 0,
     maxScore: 0,
     modeStats: []
+  },
+  duels: {
+    rating: 1500,
+    peakRating: 1500,
+    games: 0,
+    totalDuels: 0,
+    wins: 0,
+    losses: 0,
+    draws: 0,
+    winRate: 0
   }
 });
 
@@ -143,30 +178,31 @@ onMounted(fetchStats);
 </script>
 
 <style scoped>
-.content-header { padding: 2rem 3rem; border-bottom: 1px solid var(--color-border); }
-.header-title h2 { font-size: 1.5rem; margin-bottom: 4px; }
+.content-header { padding: var(--page-y) var(--page-x); border-bottom: 1px solid var(--color-border); display: flex; align-items: center; justify-content: space-between; gap: 1rem; background: var(--color-bg); }
+.header-title h2 { font-size: 1.34rem; line-height: 1.1; margin: 0 0 3px; font-weight: 700; letter-spacing: -.02em; }
 .header-title p { color: var(--color-text-muted); margin: 0; }
-.scroll-content { padding: 2rem 3rem; overflow-y: auto; flex: 1; }
+.scroll-content { padding: var(--page-y) var(--page-x); overflow-y: auto; flex: 1; background: var(--color-page, var(--color-bg)); }
 
 .loading-state { text-align: center; padding: 4rem; color: var(--color-text-muted); font-size: 1.2rem; }
 
-.stats-container { display: flex; flex-direction: column; gap: 2rem; max-width: 1000px; margin: 0 auto; }
+.stats-container { display: grid; grid-template-columns: repeat(auto-fit, minmax(430px, 1fr)); gap: 1rem; width: 100%; max-width: 1560px; margin: 0; align-items: start; }
 
 .stats-section {
   background: var(--color-bg);
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
-  padding: 1.5rem;
-  box-shadow: var(--shadow-sm);
+  padding: var(--card-pad);
+  box-shadow: var(--shadow-card);
 }
 
 .stats-section.locked {
     opacity: 0.7;
     background: var(--color-surface);
+    min-height: 96px;
 }
 
-.section-header { display: flex; align-items: center; gap: 1rem; margin-bottom: 1.5rem; }
-.section-header h3 { margin: 0; font-size: 1.2rem; }
+.section-header { display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem; }
+.section-header h3 { margin: 0; font-size: 1.05rem; font-weight: 700; }
 
 .icon-box {
   width: 40px; height: 40px;
@@ -178,16 +214,16 @@ onMounted(fetchStats);
 .duels-icon { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
 .br-icon { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
 
-.stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1.5rem; margin-bottom: 2rem; }
+.stats-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .65rem; margin-bottom: 1rem; }
 .stat-card {
   background: var(--color-surface);
-  padding: 1rem;
+  padding: .72rem .8rem;
   border-radius: 8px;
   border: 1px solid var(--color-border);
   text-align: center;
 }
-.stat-label { font-size: 0.85rem; color: var(--color-text-muted); margin-bottom: 0.5rem; text-transform: uppercase; letter-spacing: 0.5px; }
-.stat-value { font-size: 1.5rem; font-weight: 700; color: var(--color-text-main); }
+.stat-label { font-size: 0.72rem; color: var(--color-text-muted); margin-bottom: 0.5rem; text-transform: uppercase; letter-spacing: 0.5px; }
+.stat-value { font-size: 1.3rem; font-weight: 700; color: var(--color-text-main); }
 .stat-value.highlight { color: var(--color-primary); }
 
 .mode-breakdown h4 { margin-bottom: 1rem; font-size: 1rem; color: var(--color-text-muted); }
@@ -200,4 +236,5 @@ onMounted(fetchStats);
 
 .badge { font-size: 0.7rem; background: var(--color-border); padding: 2px 8px; border-radius: 10px; color: var(--color-text-muted); font-weight: 600; margin-left: auto; }
 .empty-state { text-align: center; color: var(--color-text-muted); padding: 2rem; font-style: italic; }
+@media (max-width: 620px) { .stats-container { grid-template-columns: 1fr; } .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 </style>

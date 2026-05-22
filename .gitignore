@@ -1,32 +1,68 @@
 # Dependencies
 node_modules/
+client/node_modules/
+server/node_modules/
 
-# Production build
+# Build output
 dist/
+client/dist/
+server/dist/
 build/
+coverage/
 
-# Environment variables
+# Environment variables / secrets
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
+client/.env
+client/.env.*
+server/.env
+server/.env.*
 
 # Logs
+logs/
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-logs/
-*.log
+pnpm-debug.log*
 
-# OS generated files
+# Runtime / cache
+.cache/
+.tmp/
+temp/
+tmp/
+.vite/
+vite.config.*.timestamp-*
+vite.config.*.mjs
+
+# Database / local storage
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+database.sqlite
+dev.db
+
+# Uploads / generated files
+uploads/
+public/uploads/
+server/uploads/
+
+# OS files
 .DS_Store
 Thumbs.db
 
-# User uploads
-server/uploads/
-reference_project/
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
 
-# other files
-misc/
-add_column.js
-migrate.js
-test_game_query.js
+# Package manager
+.pnpm-store/
+.yarn/
+.yarn-cache/
+reference_project/
+.result.txt
+PROJECT_REPORT.md

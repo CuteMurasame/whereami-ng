@@ -3,9 +3,11 @@ import { reactive } from 'vue';
 import axios from 'axios';
 import router from './router'; // We need router to redirect banned users
 import md5 from 'md5';
+import { API_BASE_URL, toServerUrl } from './config';
+import { disconnectSocket } from './socket';
 
 export const api = axios.create({
-  baseURL: `http://${window.location.hostname}:3000/api`
+  baseURL: API_BASE_URL
 });
 
 const state = reactive({
@@ -26,6 +28,12 @@ api.interceptors.response.use(
     if (error.response) {
       const errMsg = error.response.data?.error;
       
+      if (errMsg === 'MAINTENANCE_MODE') {
+        if (router.currentRoute.value.name !== 'maintenance') {
+          router.push('/maintenance');
+        }
+      }
+
       // If Banned OR Token Invalid -> Force Logout
       if (error.response.status === 401 || errMsg === 'YOUR_ACCOUNT_IS_BANNED') {
         authState.logout();
@@ -54,11 +62,20 @@ const setSession = (token, user) => {
   localStorage.setItem('user', JSON.stringify(user));
 };
 
-const logout = () => {
+const logout = ({ skipServer = false } = {}) => {
+  const token = state.token;
   state.token = null;
   state.user = null;
   localStorage.removeItem('token');
   localStorage.removeItem('user');
+  disconnectSocket();
+
+  // Keep logout usable even during maintenance mode or when the server is unreachable.
+  if (token && !skipServer) {
+    api.post('/auth/logout', null, {
+      headers: { Authorization: `Bearer ${token}` }
+    }).catch(() => {});
+  }
 };
 
 const getAvatar = (user) => {
@@ -66,11 +83,12 @@ const getAvatar = (user) => {
 
   // 1. If Custom Upload exists, use it (prepend server URL)
   if (user.avatar_url) {
-    return `http://${window.location.hostname}:3000${user.avatar_url}`;
+    return toServerUrl(user.avatar_url);
   }
 
   // 2. Fallback to Gravatar (using Email Hash)
-  const emailHash = user.email ? md5(user.email.trim().toLowerCase()) : '00000000000000000000000000000000';
+  const emailHash = user.email_hash
+    || (user.email ? md5(user.email.trim().toLowerCase()) : '00000000000000000000000000000000');
   return `https://www.gravatar.com/avatar/${emailHash}?d=identicon`;
 };
 

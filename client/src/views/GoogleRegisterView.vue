@@ -64,9 +64,25 @@ const password = ref('');
 const error = ref('');
 const isLoading = ref(false);
 
+const readRegistrationParams = () => {
+  const hash = window.location.hash?.replace(/^#/, '') || '';
+  const params = new URLSearchParams(hash);
+
+  // Backward-compatible fallback for older redirects.
+  if (!params.get('token') && route.query.token) params.set('token', route.query.token);
+  if (!params.get('email') && route.query.email) params.set('email', route.query.email);
+
+  return params;
+};
+
 onMounted(() => {
-  token.value = route.query.token;
-  email.value = route.query.email;
+  const params = readRegistrationParams();
+  token.value = params.get('token') || '';
+  email.value = params.get('email') || '';
+
+  // Remove temporary token from the visible URL as soon as it is read.
+  window.history.replaceState(null, document.title, window.location.pathname);
+
   if (!token.value) {
     error.value = t('auth.invalidSession');
   }
