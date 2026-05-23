@@ -150,11 +150,11 @@ whereami-ng/
 2. 创建你的分支：`git checkout -b feature/your-feature`
 3. 提交改动：`git commit -m 'feat: add some feature'`
 4. 推送分支：`git push origin feature/your-feature`
-5. 开一个 Pull Request
+5. 提交一个 Pull Request
 
 提交 PR 前请确保代码风格与现有代码一致，并在描述中说明改动的目的和测试方式。
 
-如果你发现了 Bug 或有功能建议，直接开 [Issue](https://github.com/CuteMurasame/whereami-ng/issues) 即可，不需要太正式。
+如果你发现了 Bug 或有功能建议，请提交 [Issue](https://github.com/CuteMurasame/whereami-ng/issues)。
 
 ## License
 
